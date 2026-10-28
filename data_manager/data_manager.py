@@ -141,12 +141,12 @@ if __name__ == "__main__":
     
     print("\n-------------filtered data-------------")
     filtered_list = (
-        subway_list
+        subway_list             # add a filter method as needed
         .filter_by_line(2)
         .filter_by_station_name("강남")
         .filter_by_day_type("평일")
         .filter_by_year(2025)
-        .filter_by_quarter(1)   # add a filter method as needed
+        .filter_by_quarter(1)   # especially for the quarter, there are lots of None values, so be careful when filtering by quarter
     )
     for item in filtered_list.items:
         print(f"{item}\n")
