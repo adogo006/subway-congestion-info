@@ -90,10 +90,28 @@ body {
 /* 중앙 영역 */
 
 .center-area {
-    flex: 1;
+    flex: 1 1 600px;
+    min-width: 300px;
     display: flex;
     justify-content: center;
     align-items: center;
+}
+
+.station-map {
+    width: 100%;
+}
+
+.station-map svg {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+
+.station-label {
+    fill: #334155;
+    font-size: 12px;
+    pointer-events: none;
+    user-select: none;
 }
 
 /* 오른쪽 선택 패널 */
@@ -114,6 +132,19 @@ body {
     border-radius: 30px;
     padding: 15px;
     width: 100%;
+}
+
+.direction-box,
+.day-box {
+    width: 100%;
+}
+
+.direction-box {
+    margin-bottom: 0;
+}
+
+.day-box {
+    margin-top: 0;
 }
 
 .toggle-row {

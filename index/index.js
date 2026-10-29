@@ -460,40 +460,63 @@ class MapRenderer {
         svg.setAttribute("role", "img");
         svg.setAttribute("aria-label", "지하철 노선 지도");
 
-        //지하철 선형 직선 생성
-        const line = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
-
-        //각 점 좌표들을 연결
-        line.setAttribute("points", "60,250 220,100 400,250 580,120 740,250");
-        line.setAttribute("fill", "none"); // 내부 색상 없음
-        line.setAttribute("stroke", "#334155"); // 선 색은 어두운 회색
-        line.setAttribute("stroke-width", "8"); // 선 두께는 8
-        svg.append(line); // line 객체를 svg 에 추가
-
-        // 역 데이터를 하나씩 반복하면 수행
         const stations = this.toArray(items);
-        stations.forEach((station, index) => { 
+        const coordinates = stations.map((station) => ({
+            station,
+            latitude: Number(station.lat),
+            longitude: Number(station.lot),
+        })).filter(({ latitude, longitude }) => (
+            Number.isFinite(latitude) && Number.isFinite(longitude)
+        ));
+        const padding = 70;
+        const longitudes = coordinates.map(({ longitude }) => longitude);
+        const latitudes = coordinates.map(({ latitude }) => latitude);
+        const minLongitude = Math.min(...longitudes);
+        const maxLongitude = Math.max(...longitudes);
+        const minLatitude = Math.min(...latitudes);
+        const maxLatitude = Math.max(...latitudes);
+        const longitudeRange = maxLongitude - minLongitude || 1;
+        const latitudeRange = maxLatitude - minLatitude || 1;
+        const positions = coordinates.map(({ station, latitude, longitude }) => ({
+            station,
+            x: padding + ((longitude - minLongitude) / longitudeRange) * (800 - padding * 2),
+            y: padding + ((maxLatitude - latitude) / latitudeRange) * (500 - padding * 2),
+        }));
+
+        const line = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+        line.setAttribute("points", positions.map(({ x, y }) => `${x},${y}`).join(" "));
+        line.setAttribute("fill", "none");
+        line.setAttribute("stroke", "#334155");
+        line.setAttribute("stroke-width", "8");
+        line.setAttribute("stroke-linecap", "round");
+        line.setAttribute("stroke-linejoin", "round");
+        svg.append(line);
+
+        positions.forEach(({ station, x, y }) => {
                 const point = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-                const x = 60 + (680 / Math.max(stations.length - 1, 1)) * index; // 가로 간격 일정하게 유지
-                const y = 250 + (index % 2 === 0 ? 0 : -50); // 짝수번쨰 역과 홀수번째 역이 위아래로 배치
-                point.setAttribute("cx", x);  
-                point.setAttribute("cy", y); // 원의 가로, 세로 위치 설정
-                point.setAttribute("r", "12"); // 포인트 원의 반지름
-                point.setAttribute(
-                    "fill",
-                    "#64748b",
-                );
-                point.setAttribute("data-station-code", station.station_code ?? ""); // 혼잡도에 따라 역 색상 설정
+                point.setAttribute("cx", x);
+                point.setAttribute("cy", y);
+                point.setAttribute("r", "12");
+                point.setAttribute("fill", "#64748b");
+                point.setAttribute("data-station-code", station.station_code ?? "");
                 point.setAttribute("tabindex", "0");
                 point.setAttribute("role", "button");
-                point.addEventListener("click", () => this.onStationClick?.(station)); // 역 클릭시 해당 함수 호출
-                point.addEventListener("keydown", (event) => { // 키보드 엔터로도 역 클릭 이벤트 함수 호출
+                point.setAttribute("aria-label", station.station_name || "역");
+                point.addEventListener("click", () => this.onStationClick?.(station));
+                point.addEventListener("keydown", (event) => {
                     if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
                         this.onStationClick?.(station);
                     }
                 });
                 svg.append(point);
+                const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                label.setAttribute("x", x);
+                label.setAttribute("y", y + 28);
+                label.setAttribute("text-anchor", "middle");
+                label.setAttribute("class", "station-label");
+                label.textContent = station.station_name || "이름 없음";
+                svg.append(label);
         });
 
         this.container.append(svg);

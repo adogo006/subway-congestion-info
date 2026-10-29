@@ -7,7 +7,7 @@
 
     <title>subway-congestion-dashboard</title>
 
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="./index.css?v=2">
     
 </head>
 
@@ -52,8 +52,8 @@
             <!-- 오른쪽 패널 -->
             <div class="right-panel">
 
-                <!-- 방향 및 요일 선택 -->
-                <div class="toggle-box">
+                <!-- 방향 선택 -->
+                <div class="toggle-box direction-box">
 
                     <div class="toggle-row" id="direction-selector">
 
@@ -66,6 +66,11 @@
                         </button>
 
                     </div>
+
+                </div>
+
+                <!-- 요일 선택 -->
+                <div class="toggle-box day-box">
 
                     <div class="toggle-row" id="day-selector">
 
@@ -127,5 +132,102 @@
 
     </div>
 
+<script src="./index.js"></script>
+<script>
+    document.addEventListener("DOMContentLoaded", async () => {
+        const {
+            DataManager,
+            MapRenderer,
+            ModalManager,
+            UIManager,
+        } = window.SubwayDashboard;
+
+        const dataManager = new DataManager();
+        const modalManager = new ModalManager();
+        const uiManager = new UIManager({ dataManager, modalManager });
+        const mapRenderer = new MapRenderer({
+            container: ".station-map",
+            dataManager,
+            onStationClick: (station) => uiManager.click_station(station),
+        });
+        uiManager.mapRenderer = mapRenderer;
+
+        document.querySelectorAll(".line-btn").forEach((button) => {
+            button.addEventListener("click", () => {
+                uiManager.toggle_line(button.dataset.line);
+                document.querySelectorAll(".line-btn").forEach((item) => {
+                    item.classList.toggle("active", item === button);
+                });
+            });
+        });
+
+        document.querySelectorAll("[data-direction]").forEach((button) => {
+            button.addEventListener("click", () => {
+                uiManager.toggle_direction(button.dataset.direction);
+                document.querySelectorAll("[data-direction]").forEach((item) => {
+                    item.classList.toggle("active", item === button);
+                });
+            });
+        });
+
+        document.querySelectorAll("[data-daytype]").forEach((button) => {
+            button.addEventListener("click", () => {
+                uiManager.toggle_day_type(button.dataset.daytype);
+                document.querySelectorAll("[data-daytype]").forEach((item) => {
+                    item.classList.toggle("active", item === button);
+                });
+            });
+        });
+
+        const timeItems = ["prevTime", "currentTime", "nextTime"]
+            .map((id) => document.getElementById(id));
+        let times = [];
+        let selectedTimeIndex = 0;
+        const renderTimes = () => {
+            timeItems.forEach((element, offset) => {
+                const timeIndex = (selectedTimeIndex + offset - 1 + times.length)
+                    % times.length;
+                const time = times[timeIndex];
+                element.textContent = `${time.slice(0, 2)}:${time.slice(2)}`;
+                element.classList.toggle("selected", offset === 1);
+            });
+            uiManager.wheelpicker_time(times[selectedTimeIndex]);
+        };
+        timeItems.forEach((element, offset) => {
+            element.addEventListener("click", () => {
+                selectedTimeIndex = (selectedTimeIndex + offset - 1 + times.length)
+                    % times.length;
+                renderTimes();
+            });
+        });
+        document.querySelector(".time-picker").addEventListener("wheel", (event) => {
+            event.preventDefault();
+            selectedTimeIndex = (selectedTimeIndex + (event.deltaY > 0 ? 1 : -1)
+                + times.length) % times.length;
+            renderTimes();
+        }, { passive: false });
+        try {
+            await dataManager.load_all();
+            times = [...new Set(
+                dataManager.congestion_data.data.flatMap((item) => (
+                    Object.keys(item)
+                        .filter((key) => /^hh\d{2}(?:_mm30)?_aft$/.test(key))
+                        .map((key) => key
+                            .replace(/^hh/, "")
+                            .replace("_mm30_aft", "30")
+                            .replace("_aft", "00"))
+                )),
+            )].sort((a, b) => Number(a) - Number(b));
+            selectedTimeIndex = Math.max(
+                0,
+                times.indexOf("0600"),
+            );
+            renderTimes();
+            uiManager.refresh();
+        } catch (error) {
+            console.error("대시보드 데이터를 불러오지 못했습니다.", error);
+        }
+    });
+</script>
 </body>
 </html>
