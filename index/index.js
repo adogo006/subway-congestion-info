@@ -9,7 +9,6 @@
  */
 
 class DataManager {
-
     // 생성자로 각 데이터 파일의 경로 설정
     constructor(paths = {}) {
         this.paths = {
@@ -45,24 +44,54 @@ class DataManager {
         return this;
     }
 
+    // 객체에서 필요한 데이터를 필터링해서 반환하는 함수
     filter_by_day_type(items, day_type) {
-        return this.filter_items(items, "day_type", day_type);
+        return this.filter_items(items, "day", day_type);
+    }
+
+
+    time_to_key(time) {
+        const normalizedTime = String(time).padStart(4, "0");
+        const match = normalizedTime.match(/^([01]\d|2[0-3])(00|30)$/);
+
+        if (!match) {
+            throw new Error(`시간은 00분 또는 30분 단위의 HHMM 형식이어야 합니다: ${time}`);
+        }
+
+        const [, hour, minute] = match;
+        return minute === "30"
+            ? `hh${hour}_mm30_aft`
+            : `hh${hour}_aft`;
     }
 
     filter_by_time(items, time) {
-        return this.filter_items(items, "time", time);
+        const timeKey = this.time_to_key(time);
+        const source = Array.isArray(items) ? items : Object.values(items || {});
+        // 시간대 열이 없는 데이터(station_data)는 다른 필터 결과를 유지합니다.
+        if (!source.some((item) => item && typeof item === "object" && timeKey in item)) {
+            return items;
+        }
+        return this.filter_items(
+            items,
+            timeKey,
+            (item) => item?.[timeKey] !== null && item?.[timeKey] !== undefined,
+        );
     }
 
     filter_by_line(items, line) {
-        return this.filter_items(items, "line", line);
+        return this.filter_items(items, "lnno", line);
     }
 
     filter_by_direction(items, direction) {
-        return this.filter_items(items, "direction", direction);
+        return this.filter_items(items, "drc", direction);
     }
 
     filter_by_station_code(items, station_code) {
-        return this.filter_items(items, "station_code", station_code);
+        return this.filter_items(items, "sttn_no", station_code);
+    }
+
+    filter_by_station_name(items, station_name){
+        return this.filter_items(items, "sttn_nm", station_code);
     }
 
     filter_items(items, key, value) {
@@ -73,10 +102,12 @@ class DataManager {
 
         const source = Array.isArray(items) ? items : Object.values(items);
         return source.filter((item) => {
-        if (item === null || typeof item !== "object") {
-            return false;
-        }
-            return String(item[key]) === String(value);
+            if (item === null || typeof item !== "object") {
+                return false;
+            }
+            return typeof value === "function"
+                ? value(item)
+                : String(item[key]) === String(value);
         });
     }
 
@@ -86,11 +117,12 @@ class DataManager {
         let station = this.station_data;
 
         const filterMethods = [
-        ["day_type", "filter_by_day_type"],
-        ["time", "filter_by_time"],
-        ["line", "filter_by_line"],
-        ["direction", "filter_by_direction"],
-        ["station_code", "filter_by_station_code"],
+            ["day_type", "filter_by_day_type"],
+            ["time", "filter_by_time"],
+            ["line", "filter_by_line"],
+            ["direction", "filter_by_direction"],
+            ["station_code", "filter_by_station_code"],
+            ["station_name", "filter_by_station_name"],
         ];
 
         for (const [key, methodName] of filterMethods) {
@@ -104,7 +136,6 @@ class DataManager {
                 station = this[methodName](station, filters[key]);
             }
         }
-
         return { congestion, prediction, station };
     }
 }
@@ -122,6 +153,7 @@ class MapRenderer {
         if (!element) {
             return null;
         }
+        // 문자열로 받으면 직접 요소를 찾고 아닐시 요소를 그대로 사용
         return typeof element === "string" ? document.querySelector(element) : element;
     }
 
@@ -130,191 +162,199 @@ class MapRenderer {
             return;
         }
 
-    this.container.replaceChildren();
-    const stations = this.toArray(items);
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    svg.setAttribute("viewBox", "0 0 800 500");
-    svg.setAttribute("role", "img");
-    svg.setAttribute("aria-label", "지하철 노선 지도");
+        this.container.replaceChildren(); // 이전 내용을 비우는 역할
 
-    const line = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
-    line.setAttribute("points", "60,250 220,100 400,250 580,120 740,250");
-    line.setAttribute("fill", "none");
-    line.setAttribute("stroke", "#334155");
-    line.setAttribute("stroke-width", "8");
-    svg.append(line);
+        //데이터를 역단위로 배열 로 변환
+        const stations = this.toArray(items);
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
 
-    stations.forEach((station, index) => {
-        const point = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-        const x = 60 + (680 / Math.max(stations.length - 1, 1)) * index;
-        const y = 250 + (index % 2 === 0 ? 0 : -50);
-        point.setAttribute("cx", x);
-        point.setAttribute("cy", y);
-        point.setAttribute("r", "12");
-        point.setAttribute("fill", this.getCongestionColor(station.congestion));
-        point.setAttribute("data-station-code", station.station_code ?? "");
-        point.setAttribute("tabindex", "0");
-        point.setAttribute("role", "button");
-        point.addEventListener("click", () => this.onStationClick?.(station));
-        point.addEventListener("keydown", (event) => {
-            if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                this.onStationClick?.(station);
-            }
+        svg.setAttribute("viewBox", "0 0 800 500"); // 내부 좌표공간을 가로 800, 세로 500으로 설정
+        svg.setAttribute("role", "img");
+        svg.setAttribute("aria-label", "지하철 노선 지도");
+
+        //지하철 선형 직선 생성
+        const line = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+
+        //각 점 좌표들을 연결
+        line.setAttribute("points", "60,250 220,100 400,250 580,120 740,250");
+        line.setAttribute("fill", "none"); // 내부 색상 없음
+        line.setAttribute("stroke", "#334155"); // 선 색은 어두운 회색
+        line.setAttribute("stroke-width", "8"); // 선 두께는 8
+        svg.append(line); // line 객체를 svg 에 추가
+
+        // 역 데이터를 하나씩 반복하면 수행
+        stations.forEach((station, index) => { 
+                const point = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+                const x = 60 + (680 / Math.max(stations.length - 1, 1)) * index; // 가로 간격 일정하게 유지
+                const y = 250 + (index % 2 === 0 ? 0 : -50); // 짝수번쨰 역과 홀수번째 역이 위아래로 배치
+                point.setAttribute("cx", x);  
+                point.setAttribute("cy", y); // 원의 가로, 세로 위치 설정
+                point.setAttribute("r", "12"); // 포인트 원의 반지름
+                point.setAttribute("fill", this.getCongestionColor(station.congestion)); //역 혼잡도에 따라 역의 색상을 결정 
+                point.setAttribute("data-station-code", station.station_code ?? ""); // 혼잡도에 따라 역 색상 설정
+                point.setAttribute("tabindex", "0");
+                point.setAttribute("role", "button");
+                point.addEventListener("click", () => this.onStationClick?.(station)); // 역 클릭시 해당 함수 호출
+                point.addEventListener("keydown", (event) => { // 키보드 엔터로도 역 클릭 이벤트 함수 호출
+                    if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        this.onStationClick?.(station);
+                    }
+                });
+                svg.append(point);
         });
-        svg.append(point);
-    });
 
-    this.container.append(svg);
-    return svg;
-  }
-
-  update_heat_map(items = this.dataManager?.prediction_data) {
-    this.showHeatMap = !this.showHeatMap;
-    const points = this.container?.querySelectorAll("circle") || [];
-    const predictions = this.toArray(items);
-
-    points.forEach((point, index) => {
-      const prediction = predictions[index];
-      point.setAttribute(
-        "fill",
-        this.showHeatMap ? this.getCongestionColor(prediction?.congestion) : "#cbd5e1",
-      );
-    });
-
-    return this.showHeatMap;
-  }
-
-  toArray(items) {
-    return Array.isArray(items) ? items : Object.values(items || {});
-  }
-
-  getCongestionColor(value) {
-    const congestion = Number(value);
-    if (Number.isNaN(congestion)) {
-      return "#64748b";
+        this.container.append(svg);
+        return svg;
     }
-    if (congestion >= 130) return "#dc2626";
-    if (congestion >= 100) return "#f97316";
-    if (congestion >= 70) return "#eab308";
-    return "#22c55e";
-  }
+
+    update_heat_map(items = this.dataManager?.prediction_data) {
+        this.showHeatMap = !this.showHeatMap;
+        const points = this.container?.querySelectorAll("circle") || [];
+        const predictions = this.toArray(items);
+
+        points.forEach((point, index) => { // INDEX 는 역을 의미
+            const prediction = predictions[index];
+            point.setAttribute(
+                "fill",
+                this.showHeatMap ? this.getCongestionColor(prediction?.congestion) : "#cbd5e1",
+            );
+        });
+
+        return this.showHeatMap;
+    }
+
+    toArray(items) {
+        return Array.isArray(items) ? items : Object.values(items || {});
+    }
+
+    // 혼잡도 별로 색상을 설정
+    getCongestionColor(value) {
+        const congestion = Number(value);
+        if (Number.isNaN(congestion)) {
+            return "#64748b";
+        }
+        if (congestion >= 130) return "#dc2626";
+        if (congestion >= 100) return "#f97316";
+        if (congestion >= 70) return "#eab308";
+        return "#22c55e";
+    }
 }
 
 class ModalManager {
-  constructor({ modal, title, content } = {}) {
-    this.modal = this.findElement(modal) || this.createModal();
-    this.title = this.findElement(title, this.modal);
-    this.content = this.findElement(content, this.modal);
-  }
-
-  findElement(element, parent = document) {
-    if (!element) return null;
-    return typeof element === "string" ? parent.querySelector(element) : element;
-  }
-
-  createModal() {
-    const modal = document.createElement("section");
-    const title = document.createElement("h2");
-    const content = document.createElement("div");
-    modal.append(title, content);
-    modal.hidden = true;
-    modal.setAttribute("role", "dialog");
-    modal.setAttribute("aria-modal", "true");
-    document.body.append(modal);
-    return modal;
-  }
-
-  open_modal(station) {
-    if (!this.modal) return;
-    station = station || {};
-    this.modal.hidden = false;
-    if (this.title) {
-      this.title.textContent = station.station_name || "역 상세 정보";
+    constructor({ modal, title, content } = {}) {
+        this.modal = this.findElement(modal) || this.createModal();
+        this.title = this.findElement(title, this.modal);
+        this.content = this.findElement(content, this.modal);
     }
-    if (this.content) {
-      this.content.textContent = "";
-      this.render_charts(station);
+
+    findElement(element, parent = document) {
+        if (!element) return null;
+        return typeof element === "string" ? parent.querySelector(element) : element;
     }
-  }
 
-  close_modal() {
-    if (this.modal) {
-      this.modal.hidden = true;
+    createModal() {
+        const modal = document.createElement("section");
+        const title = document.createElement("h2");
+        const content = document.createElement("div");
+        modal.append(title, content);
+        modal.hidden = true;
+        modal.setAttribute("role", "dialog");
+        modal.setAttribute("aria-modal", "true");
+        document.body.append(modal);
+        return modal;
     }
-  }
 
-  render_charts(station) {
-    if (!this.content) return;
-    const values = station.congestion_history || station.congestion || [];
-    const chart = document.createElement("div");
-    chart.className = "congestion-chart";
+    open_modal(station) {
+        if (!this.modal) return;
+        station = station || {};
+        this.modal.hidden = false;
+        if (this.title) {
+            this.title.textContent = station.station_name || "역 상세 정보";
+        }
+        if (this.content) {
+            this.content.textContent = "";
+            this.render_charts(station);
+        }
+    }
 
-    const data = Array.isArray(values) ? values : [values];
-    data.forEach((value, index) => {
-      const bar = document.createElement("div");
-      bar.className = "congestion-bar";
-      bar.style.height = `${Math.max(4, Math.min(Number(value) || 0, 200) / 2)}px`;
-      bar.title = `${index + 1}: ${value}`;
-      chart.append(bar);
-    });
-    this.content.append(chart);
-  }
+    close_modal() {
+        if (this.modal) {
+            this.modal.hidden = true;
+        }
+    }
+
+    render_charts(station) {
+        if (!this.content) return;
+        const values = station.congestion_history || station.congestion || [];
+        const chart = document.createElement("div");
+        chart.className = "congestion-chart";
+
+        const data = Array.isArray(values) ? values : [values];
+        data.forEach((value, index) => {
+        const bar = document.createElement("div");
+        bar.className = "congestion-bar";
+        bar.style.height = `${Math.max(4, Math.min(Number(value) || 0, 200) / 2)}px`;
+        bar.title = `${index + 1}: ${value}`;
+        chart.append(bar);
+        });
+        this.content.append(chart);
+    }
 }
 
 class UIManager {
-  constructor({ dataManager, mapRenderer, modalManager } = {}) {
-    this.dataManager = dataManager;
-    this.mapRenderer = mapRenderer;
-    this.modalManager = modalManager;
-    this.day_type = "";
-    this.time = "";
-    this.line = "";
-    this.direction = "";
-    this.station_code = "";
-  }
+    constructor({ dataManager, mapRenderer, modalManager } = {}) {
+        this.dataManager = dataManager;
+        this.mapRenderer = mapRenderer;
+        this.modalManager = modalManager;
+        this.day_type = "";
+        this.time = "";
+        this.line = "";
+        this.direction = "";
+        this.station_code = "";
+    }
 
-  get_filters() {
-    return {
-      day_type: this.day_type,
-      time: this.time,
-      line: this.line,
-      direction: this.direction,
-      station_code: this.station_code,
-    };
-  }
+    get_filters() {
+        return {
+        day_type: this.day_type,
+        time: this.time,
+        line: this.line,
+        direction: this.direction,
+        station_code: this.station_code,
+        };
+    }
 
-  refresh() {
-    const data = this.dataManager.get_filtered_data(this.get_filters());
-    this.mapRenderer.render_map(data.station);
-    return data;
-  }
+    refresh() {
+        const data = this.dataManager.get_filtered_data(this.get_filters());
+        this.mapRenderer.render_map(data.station);
+        return data;
+    }
 
-  click_station(station) {
-    this.station_code = station.station_code;
-    this.modalManager.open_modal(station);
-    return this.refresh();
-  }
+    click_station(station) {
+        this.station_code = station.station_code;
+        this.modalManager.open_modal(station);
+        return this.refresh();
+    }
 
-  toggle_day_type(value) {
-    this.day_type = value;
-    return this.refresh();
-  }
+    toggle_day_type(value) {
+        this.day_type = value;
+        return this.refresh();
+    }
 
-  toggle_line(value) {
-    this.line = value;
-    return this.refresh();
-  }
+    toggle_line(value) {
+        this.line = value;
+        return this.refresh();
+    }
 
-  toggle_direction(value) {
-    this.direction = value;
-    return this.refresh();
-  }
+    toggle_direction(value) {
+        this.direction = value;
+        return this.refresh();
+    }
 
-  wheelpicker_time(value) {
-    this.time = value;
-    return this.refresh();
-  }
+    wheelpicker_time(value) {
+        this.time = value;
+        return this.refresh();
+    }
 }
 
 // Expose the classes for the HTML page and for browser-console experimentation.
