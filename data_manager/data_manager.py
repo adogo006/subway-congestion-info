@@ -88,6 +88,7 @@ class ByQuarter(SubwayFilter):
 #endregion
 
 # SRP: CSV 로딩과 파싱이라는 데이터 입력·변환 작업을 담당한다.
+# staticmethod를 사용하여 인스턴스 생성 없이 호출한다.
 class DataConverter:
     @staticmethod
     def load_csv(path):
