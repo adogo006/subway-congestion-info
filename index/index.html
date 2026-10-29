@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    
+    <meta charset="UTF-8">
+
+    <title>subway-congestion-dashboard</title>
+
+    <link rel="stylesheet" href="style.css">
+    
+</head>
+
+<body>
+
+    <div class="container">
+
+        <header class="header">
+            
+            <h1>지하철 혼잡도</h1>
+            
+        </header>
+
+        <div class="selection-info">  
+            1호선 · 상선 · 평일 · 4:30
+        </div>
+
+        <!-- 메인 -->
+        <main class="main">
+
+            <!-- 왼쪽 패널, 호선 선택 -->
+            <div class="line-selector">
+
+                <button class="line-btn active" data-line="1">1</button>
+                <button class="line-btn" data-line="2">2</button>
+                <button class="line-btn" data-line="3">3</button>
+                <button class="line-btn" data-line="4">4</button>
+                <button class="line-btn" data-line="5">5</button>
+                <button class="line-btn" data-line="6">6</button>
+                <button class="line-btn" data-line="7">7</button>
+                <button class="line-btn" data-line="8">8</button>
+
+            </div>
+
+            <!-- 중앙 -->
+            <div class="center-area">
+
+                <div class="station-map"></div>
+
+            </div>
+
+            <!-- 오른쪽 패널 -->
+            <div class="right-panel">
+
+                <!-- 방향 및 요일 선택 -->
+                <div class="toggle-box">
+
+                    <div class="toggle-row" id="direction-selector">
+
+                        <button class="toggle-btn active" data-direction="상선">
+                            상선
+                        </button>
+
+                        <button class="toggle-btn" data-direction="하선">
+                            하선
+                        </button>
+
+                    </div>
+
+                    <div class="toggle-row" id="day-selector">
+
+                        <button class="toggle-btn active" data-daytype="평일">
+                            평일
+                        </button>
+
+                        <button class="toggle-btn" data-daytype="토요일">
+                            토요일
+                        </button>
+
+                        <button class="toggle-btn" data-daytype="일요일">
+                            일요일
+                        </button>
+
+                    </div>
+
+                </div>
+
+                <!-- 시간 선택 -->
+                <div class="time-picker">
+                    
+                    <div class="time-item" id="prevTime"></div>    <!-- 이전 시간 -->
+
+                    <div class="time-item selected" id="currentTime"></div>    <!-- 선택된 시간 -->
+
+                    <div class="time-item" id="nextTime"></div>    <!-- 이후 시간 -->
+
+                </div>
+
+            </div>
+
+        </main>
+
+        <!-- 혼잡도 범례 -->
+        <div class="legend">
+
+            <div class="legend-item">
+                <span class="dot green"></span>
+                원활
+            </div>
+
+            <div class="legend-item">
+                <span class="dot yellow"></span>
+                보통
+            </div>
+
+            <div class="legend-item">
+                <span class="dot pink"></span>
+                혼잡
+            </div>
+
+            <div class="legend-item">
+                <span class="dot red"></span>
+                매우 혼잡
+            </div>
+
+        </div>
+
+    </div>
+
+</body>
+</html>
