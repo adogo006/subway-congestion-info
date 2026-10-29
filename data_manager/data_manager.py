@@ -1,6 +1,7 @@
 import csv
 import os
 
+# SRP: 지하철 데이터의 속성을 보관하고 문자열로 출력한다.
 class SubwayData:
     def __init__(self, line, station_code, station_name, day_type, direction, slot_congestion, year, quarter):
         self.line = line
@@ -15,63 +16,78 @@ class SubwayData:
     def __str__(self):
         return f"[SubwayData]\nline={self.line}, station_code={self.station_code}, station_name='{self.station_name}', day_type='{self.day_type}', direction='{self.direction}', year={self.year}, quarter={self.quarter}\nslot_congestion={self.slot_congestion}"
 
+# SRP: 지하철 데이터 목록을 관리하고 필터링한다.
+# OCP: SubwayFilter의 matches()를 호출하여, 새로운 필터 조건을 추가해도 기존 filter() 코드를 수정하지 않도록 한다.
 class SubwayList:
     def __init__(self, items):
         self.items = items
 
-    def filter_by_line(self, line):
+    def filter(self, condition):
         result = []
-        for item in self.items:
-            if item.line == line:
-                result.append(item)
-        return SubwayList(result)
 
-    def filter_by_station_code(self, station_code):
-        result = []
         for item in self.items:
-            if item.station_code == station_code:
+            if condition.matches(item):
                 result.append(item)
-        return SubwayList(result)
 
-    def filter_by_station_name(self, station_name):
-        result = []
-        for item in self.items:
-            if item.station_name == station_name:
-                result.append(item)
-        return SubwayList(result)
-
-    def filter_by_day_type(self, day_type):
-        result = []
-        for item in self.items:
-            if item.day_type == day_type:
-                result.append(item)
-        return SubwayList(result)
-
-    def filter_by_direction(self, direction):
-        result = []
-        for item in self.items:
-            if item.direction == direction:
-                result.append(item)
-        return SubwayList(result)
-
-    def filter_by_year(self, year):
-        result = []
-        for item in self.items:
-            if item.year == year:
-                result.append(item)
-        return SubwayList(result)
-
-    def filter_by_quarter(self, quarter):
-        result = []
-        for item in self.items:
-            if item.quarter == quarter:
-                result.append(item)
         return SubwayList(result)
 
     def __len__(self):
         return len(self.items)
 
+# SRP: 필터링 조건을 판별하는 역할을 담당한다.
+# OCP: 새로운 필터링 조건이 추가될 때 기존 코드를 수정하지 않고 자식 클래스를 추가하여 확장할 수 있다.
+# LSP: 자식 클래스는 matches(item)의 규약에 따라 전달받은 SubwayData에 대해 조건이 맞으면 True, 맞지 않으면 False를 반환한다.
+class SubwayFilter:
+    def matches(self, item):
+        return True
 
+#region Child Filter Classes
+
+class ByYear(SubwayFilter):
+    def __init__(self, year):
+        self.year = year
+
+    def matches(self, item):
+        return item.year == self.year
+
+class ByDayType(SubwayFilter):
+    def __init__(self, day_type):
+        self.day_type = day_type
+
+    def matches(self, item):
+        return item.day_type == self.day_type
+
+class ByLine(SubwayFilter):
+    def __init__(self, line):
+        self.line = line
+
+    def matches(self, item):
+        return item.line == self.line
+    
+class ByStationCode(SubwayFilter):
+    def __init__(self, station_code):
+        self.station_code = station_code
+
+    def matches(self, item):
+        return item.station_code == self.station_code
+    
+class ByStationName(SubwayFilter):
+    def __init__(self, station_name):
+        self.station_name = station_name
+
+    def matches(self, item):
+        return item.station_name == self.station_name
+
+class ByQuarter(SubwayFilter):
+    def __init__(self, quarter):
+        self.quarter = quarter
+
+    def matches(self, item):
+        return item.quarter == self.quarter
+
+#endregion
+
+# SRP: CSV 로딩과 파싱이라는 데이터 입력·변환 작업을 담당한다.
 class DataConverter:
     @staticmethod
     def load_csv(path):
@@ -142,11 +158,10 @@ if __name__ == "__main__":
     print("\n-------------filtered data-------------")
     filtered_list = (
         subway_list             # add a filter method as needed
-        .filter_by_line(2)
-        .filter_by_station_name("강남")
-        .filter_by_day_type("평일")
-        .filter_by_year(2025)
-        .filter_by_quarter(1)   # especially for the quarter, there are lots of None values, so be careful when filtering by quarter
+        .filter(ByLine(2)).filter(ByStationName("강남"))
+        .filter(ByYear(2025))
+        .filter(ByDayType("평일"))
+        .filter(ByQuarter(1))   # especially for the quarter, there are lots of None values, so be careful when filtering by quarter
     )
     for item in filtered_list.items:
         print(f"{item}\n")
