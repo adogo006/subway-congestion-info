@@ -1,0 +1,382 @@
+/* 기본 설정 */
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background-color: #ffffff;
+    font-family: Arial, sans-serif;
+    color: #333;
+}
+
+/* 전체 */
+
+.container {
+    width: 100%;
+    min-height: 100vh;
+    padding: 30px 50px;
+}
+
+/* 제목 */
+
+.header {
+    text-align: center;
+    border-bottom: 2px solid #555;
+    padding-bottom: 20px;
+}
+
+.header h1 {
+    font-size: 26px;
+    font-weight: 500;
+    margin: 0;
+}
+
+.selection-info {
+    color: #aaa;
+    font-size: 18px;
+    text-align: center;
+    margin-top: 20px
+}
+
+/* 메인 영역 */
+
+.main {
+    display: flex;
+    justify-content: space-between;
+    position: relative;
+    min-height: 550px;
+    padding-top: 80px;
+    gap: 30px;
+}
+
+/* 호선 선택 */
+
+.line-selector {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    border: 2px solid #ddd;
+    border-radius: 35px;
+    padding: 20px 15px;
+    height: fit-content;
+    margin-top: -10px
+}
+
+.line-btn {
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    border: 2px solid #999;
+    background-color: white;
+    cursor: pointer;
+    font-size: 17px;
+    transition: 0.2s;
+}
+
+.line-btn:hover {
+    background-color: #eee;
+    transform: scale(1.08);
+}
+
+.line-btn.active {
+    background-color: #333;
+    color: white;
+    border-color: #333;
+}
+
+/* 중앙 영역 */
+
+.center-area {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+/* 오른쪽 선택 패널 */
+
+.right-panel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 30px;
+    width: 220px;
+    margin-top: 40px;
+}
+
+/* 방향 및 요일 토글 */
+
+.toggle-box {
+    border: 2px solid #ddd;
+    border-radius: 30px;
+    padding: 15px;
+    width: 100%;
+}
+
+.toggle-row {
+    display: flex;
+    justify-content: center;
+    gap: 5px;
+    margin-bottom: 10px;
+}
+
+.toggle-row:last-child {
+    margin-bottom: 0;
+}
+
+.toggle-btn {
+    border: 1.5px solid #999;
+    border-radius: 20px;
+    background-color: white;
+    padding: 8px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: 0.2s;
+}
+
+.toggle-btn:hover {
+    background-color: #eee;
+}
+
+.toggle-btn.active {
+    background-color: #333;
+    color: white;
+    border-color: #333;
+}
+
+/* 시간 선택 휠 피커 */
+
+.time-picker {
+    width: 110px;
+    height: 150px;
+    border: 2px solid #ddd;
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+}
+
+.time-item {
+    width: 100%;
+    height: 45px;
+    flex-shrink: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 16px;
+    color: #aaa;
+    cursor: pointer;
+    transition: 0.2s;
+}
+
+.time-item:hover {
+    color: #eee;
+}
+
+.time-item.selected {
+    color: #333;
+    font-size: 22px;
+    font-weight: bold;
+
+    border-top: 1px solid #aaa;
+    border-bottom: 1px solid #aaa;
+}
+
+/* 혼잡도 범례 */
+
+.legend {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 35px;
+    margin-top: 50px;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+}
+
+.dot {
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    border: 1px solid #555;
+}
+
+/* 혼잡도 색상 */
+
+.green {
+    background-color: #58d68d;
+}
+
+.yellow {
+    background-color: #f4d03f;
+}
+
+.pink {
+    background-color: #f1948a;
+}
+
+.red {
+    background-color: #ff3030;
+}
+
+/* 모달 배경 */
+.modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background-color: rgba(0, 0, 0, 0.35);
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+
+.modal-overlay.active {
+    display: flex;
+}
+
+/* 모달 본체 */
+.station-modal {
+    position: relative;
+    width: 500px;
+    max-width: 90%;
+    padding: 28px 30px 24px;
+    background-color: white;
+    border: 1.5px solid #333;
+}
+
+/* 닫기 버튼 */
+.modal-close {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    border: none;
+    background: none;
+    font-size: 24px;
+    cursor: pointer;
+}
+
+/* 모달 상단 */
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding-right: 20px;
+}
+
+/* 호선, 역 이름 */
+.modal-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.modal-line {
+    width: 27px;
+    height: 27px;
+    border: 1.5px solid #333;
+    border-radius: 50%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 16px;
+}
+
+.modal-station {
+    font-size: 23px;
+    font-weight: 500;
+    margin: 0;
+}
+
+/* 방향 · 요일 · 시간 */
+.modal-info {
+    margin-top: 8px;
+    font-size: 14px;
+    color: #555;
+}
+
+/* 예상 혼잡도 */
+.modal-right {
+    text-align: center;
+}
+
+.modal-caption {
+    font-size: 13px;
+}
+
+.modal-prediction {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 5px;
+}
+
+.prediction-value {
+    font-size: 30px;
+    font-weight: 500;
+}
+
+.prediction-dot {
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    background-color: #ff3030;
+    border: 1px solid #555;
+}
+
+/* 막대그래프 영역 */
+.modal-chart {
+    margin-top: 28px;
+}
+
+.chart-item {
+    margin-bottom: 14px;
+}
+
+.chart-item:last-child {
+    margin-bottom: 0;
+}
+
+.chart-label {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 5px;
+    font-size: 13px;
+}
+
+/* 그래프 바탕 */
+.chart-track {
+    width: 100%;
+    height: 18px;
+    border: 1.5px solid #555;
+    border-radius: 20px;
+    overflow: hidden;
+    background-color: white;
+}
+
+/* 그래프 색상 부분 */
+.chart-fill {
+    height: 100%;
+    border-radius: 20px;
+    transition: width 0.3s;
+}
+
+.existing-bar {
+    width: 78.7%;
+    background-color: #f1948a;
+}
+
+.predicted-bar {
+    width: 92.4%;
+    background-color: #ff3030;
+}
