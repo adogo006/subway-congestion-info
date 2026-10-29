@@ -66,69 +66,69 @@ class DataManager {
     }
 
     filter_items(items, key, value) {
-        
+
         if (value === undefined || value === null || value === "") {
             return items;
         }
 
-    const source = Array.isArray(items) ? items : Object.values(items);
-    return source.filter((item) => {
-      if (item === null || typeof item !== "object") {
-        return false;
-      }
-
-      return String(item[key]) === String(value);
-    });
-  }
-
-  get_filtered_data(filters = {}) {
-    let congestion = this.congestion_data;
-    let prediction = this.prediction_data;
-    let station = this.station_data;
-
-    const filterMethods = [
-      ["day_type", "filter_by_day_type"],
-      ["time", "filter_by_time"],
-      ["line", "filter_by_line"],
-      ["direction", "filter_by_direction"],
-      ["station_code", "filter_by_station_code"],
-    ];
-
-    for (const [key, methodName] of filterMethods) {
-      if (filters[key] === undefined || filters[key] === null || filters[key] === "") {
-        continue;
-      }
-
-      congestion = this[methodName](congestion, filters[key]);
-      prediction = this[methodName](prediction, filters[key]);
-      if (key === "line" || key === "station_code") {
-        station = this[methodName](station, filters[key]);
-      }
+        const source = Array.isArray(items) ? items : Object.values(items);
+        return source.filter((item) => {
+        if (item === null || typeof item !== "object") {
+            return false;
+        }
+            return String(item[key]) === String(value);
+        });
     }
 
-    return { congestion, prediction, station };
-  }
+    get_filtered_data(filters = {}) {
+        let congestion = this.congestion_data;
+        let prediction = this.prediction_data;
+        let station = this.station_data;
+
+        const filterMethods = [
+        ["day_type", "filter_by_day_type"],
+        ["time", "filter_by_time"],
+        ["line", "filter_by_line"],
+        ["direction", "filter_by_direction"],
+        ["station_code", "filter_by_station_code"],
+        ];
+
+        for (const [key, methodName] of filterMethods) {
+            if (filters[key] === undefined || filters[key] === null || filters[key] === "") {
+                continue;
+            }
+
+            congestion = this[methodName](congestion, filters[key]);
+            prediction = this[methodName](prediction, filters[key]);
+            if (key === "line" || key === "station_code") {
+                station = this[methodName](station, filters[key]);
+            }
+        }
+
+        return { congestion, prediction, station };
+    }
 }
 
 class MapRenderer {
-  constructor({ container, dataManager, onStationClick } = {}) {
-    this.container = this.findElement(container);
-    this.dataManager = dataManager;
-    this.onStationClick = onStationClick;
-    this.showHeatMap = true;
-  }
-
-  findElement(element) {
-    if (!element) {
-      return null;
+    constructor({ container, dataManager, onStationClick } = {}) {
+        this.container = this.findElement(container);
+        this.dataManager = dataManager;
+        this.onStationClick = onStationClick;
+        this.showHeatMap = true;
     }
-    return typeof element === "string" ? document.querySelector(element) : element;
-  }
 
-  render_map(items = this.dataManager?.station_data) {
-    if (!this.container) {
-      return;
+    // 지도를 넣을 container 요소를 찾는데 사용되는 메서드
+    findElement(element) {
+        if (!element) {
+            return null;
+        }
+        return typeof element === "string" ? document.querySelector(element) : element;
     }
+
+    render_map(items = this.dataManager?.station_data) {
+        if (!this.container) {
+            return;
+        }
 
     this.container.replaceChildren();
     const stations = this.toArray(items);
@@ -145,24 +145,24 @@ class MapRenderer {
     svg.append(line);
 
     stations.forEach((station, index) => {
-      const point = document.createElementNS("http://www.w3.org/2000/svg", "circle");
-      const x = 60 + (680 / Math.max(stations.length - 1, 1)) * index;
-      const y = 250 + (index % 2 === 0 ? 0 : -50);
-      point.setAttribute("cx", x);
-      point.setAttribute("cy", y);
-      point.setAttribute("r", "12");
-      point.setAttribute("fill", this.getCongestionColor(station.congestion));
-      point.setAttribute("data-station-code", station.station_code ?? "");
-      point.setAttribute("tabindex", "0");
-      point.setAttribute("role", "button");
-      point.addEventListener("click", () => this.onStationClick?.(station));
-      point.addEventListener("keydown", (event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          this.onStationClick?.(station);
-        }
-      });
-      svg.append(point);
+        const point = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        const x = 60 + (680 / Math.max(stations.length - 1, 1)) * index;
+        const y = 250 + (index % 2 === 0 ? 0 : -50);
+        point.setAttribute("cx", x);
+        point.setAttribute("cy", y);
+        point.setAttribute("r", "12");
+        point.setAttribute("fill", this.getCongestionColor(station.congestion));
+        point.setAttribute("data-station-code", station.station_code ?? "");
+        point.setAttribute("tabindex", "0");
+        point.setAttribute("role", "button");
+        point.addEventListener("click", () => this.onStationClick?.(station));
+        point.addEventListener("keydown", (event) => {
+            if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                this.onStationClick?.(station);
+            }
+        });
+        svg.append(point);
     });
 
     this.container.append(svg);
