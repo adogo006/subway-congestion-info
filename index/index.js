@@ -112,7 +112,16 @@ class CongestionData extends Data {
     }
 
     filter_by_direction(items, direction) {
-        return this.filter_items(items, "drc", direction);
+        const directions = direction === "상선"
+            ? ["상선", "내선"]
+            : direction === "하선"
+                ? ["하선", "외선"]
+                : [direction];
+        return this.filter_items(
+            items,
+            "drc",
+            (item) => directions.includes(item.drc),
+        );
     }
 
     filter_by_station_code(items, stationCode) {
@@ -295,11 +304,13 @@ class DataManager {
             congestion: paths.congestion || "../data/congestion.json",
             prediction: paths.prediction || "../data/prediction.json",
             station: paths.station || "../data/station.json",
+            routeOrder: paths.routeOrder || "../data/route_order.json",
         };
 
         this.congestion_data = new CongestionData(this.paths.congestion);
         this.prediction_data = new PredictionData(this.paths.prediction);
         this.station_data = new StationData(this.paths.station);
+        this.route_order_data = new Data(this.paths.routeOrder);
         this.matched_station_data = [];
     }
 
@@ -308,6 +319,7 @@ class DataManager {
             this.congestion_data.load_json(),
             this.prediction_data.load_json(),
             this.station_data.load_json(),
+            this.route_order_data.load_json(),
         ]);
         this.matched_station_data = this.match_station_data(
             this.congestion_data.data,
@@ -427,6 +439,36 @@ class DataManager {
             station,
         };
     }
+
+    order_stations(stations, line) {
+        const order = this.route_order_data.data?.[String(line)];
+        const stationById = new Map(
+            this.to_array(stations).map((station) => [
+                this.normalize_station_code(station.station_code),
+                station,
+            ]),
+        );
+        if (!order) {
+            return this.to_array(stations);
+        }
+
+        const ordered = [];
+        const added = new Set();
+        Object.values(order).flat().forEach((stationCode) => {
+            const normalizedCode = this.normalize_station_code(stationCode);
+            const station = stationById.get(normalizedCode);
+            if (station && !added.has(normalizedCode)) {
+                ordered.push(station);
+                added.add(normalizedCode);
+            }
+        });
+        stationById.forEach((station, stationCode) => {
+            if (!added.has(stationCode)) {
+                ordered.push(station);
+            }
+        });
+        return ordered;
+    }
 }
 
 class MapRenderer {
@@ -446,7 +488,7 @@ class MapRenderer {
         return typeof element === "string" ? document.querySelector(element) : element;
     }
 
-    render_map(items = this.dataManager?.matched_station_data) {
+    render_map(items = this.dataManager?.matched_station_data, line) {
         if (!this.container) {
             return;
         }
@@ -460,7 +502,9 @@ class MapRenderer {
         svg.setAttribute("role", "img");
         svg.setAttribute("aria-label", "지하철 노선 지도");
 
-        const stations = this.toArray(items);
+        const stations = line === undefined
+            ? this.toArray(items)
+            : this.dataManager.order_stations(items, line);
         const coordinates = stations.map((station) => ({
             station,
             latitude: Number(station.lat),
@@ -483,14 +527,14 @@ class MapRenderer {
             y: padding + ((maxLatitude - latitude) / latitudeRange) * (500 - padding * 2),
         }));
 
-        const line = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
-        line.setAttribute("points", positions.map(({ x, y }) => `${x},${y}`).join(" "));
-        line.setAttribute("fill", "none");
-        line.setAttribute("stroke", "#334155");
-        line.setAttribute("stroke-width", "8");
-        line.setAttribute("stroke-linecap", "round");
-        line.setAttribute("stroke-linejoin", "round");
-        svg.append(line);
+        const routeLine = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
+        routeLine.setAttribute("points", positions.map(({ x, y }) => `${x},${y}`).join(" "));
+        routeLine.setAttribute("fill", "none");
+        routeLine.setAttribute("stroke", "#334155");
+        routeLine.setAttribute("stroke-width", "8");
+        routeLine.setAttribute("stroke-linecap", "round");
+        routeLine.setAttribute("stroke-linejoin", "round");
+        svg.append(routeLine);
 
         positions.forEach(({ station, x, y }) => {
                 const point = document.createElementNS("http://www.w3.org/2000/svg", "circle");
@@ -660,9 +704,13 @@ class ModalManager {
         if (!row) {
             return false;
         }
+        const directionMatches = filters.direction === undefined
+            || filters.direction === row.drc
+            || (filters.direction === "상선" && row.drc === "내선")
+            || (filters.direction === "하선" && row.drc === "외선");
         return (filters.year === undefined || String(row.yr) === String(filters.year))
             && (filters.day_type === undefined || row.day === filters.day_type)
-            && (filters.direction === undefined || row.drc === filters.direction)
+            && directionMatches
             && (filters.quarter === undefined || String(row.qu) === String(filters.quarter));
     }
 }
@@ -692,7 +740,7 @@ class UIManager {
     refresh() {
         const { time, ...dataFilters } = this.get_filters();
         const data = this.dataManager.get_filtered_data(dataFilters);
-        this.mapRenderer.render_map(data.station);
+        this.mapRenderer.render_map(data.station, this.line);
         this.mapRenderer.render_heat_map(data.congestion, time);
         this.refresh_modal(data);
         return data;
