@@ -7,7 +7,7 @@
 
     <title>subway-congestion-dashboard</title>
 
-    <link rel="stylesheet" href="./index.css?v=2">
+    <link rel="stylesheet" href="./index.css?v=9">
     
 </head>
 
@@ -21,8 +21,8 @@
             
         </header>
 
-        <div class="selection-info">  
-            1호선 · 상선 · 평일 · 4:30
+        <div class="selection-info" aria-live="polite">
+            1호선 · 상선 · 평일 · 06:00
         </div>
 
         <!-- 메인 -->
@@ -132,7 +132,7 @@
 
     </div>
 
-<script src="./index.js?v=3"></script>
+<script src="./index.js?v=13"></script>
 <script>
     document.addEventListener("DOMContentLoaded", async () => {
         const {
@@ -145,6 +145,16 @@
         const dataManager = new DataManager();
         const modalManager = new ModalManager();
         const uiManager = new UIManager({ dataManager, modalManager });
+        const selectionInfo = document.querySelector(".selection-info");
+        const updateSelectionInfo = () => {
+            const time = String(uiManager.time).padStart(4, "0");
+            selectionInfo.textContent = [
+                `${uiManager.line}호선`,
+                uiManager.direction,
+                uiManager.day_type,
+                `${time.slice(0, 2)}:${time.slice(2)}`,
+            ].join(" · ");
+        };
         const mapRenderer = new MapRenderer({
             container: ".station-map",
             dataManager,
@@ -155,6 +165,7 @@
         document.querySelectorAll(".line-btn").forEach((button) => {
             button.addEventListener("click", () => {
                 uiManager.toggle_line(button.dataset.line);
+                updateSelectionInfo();
                 document.querySelectorAll(".line-btn").forEach((item) => {
                     item.classList.toggle("active", item === button);
                 });
@@ -164,6 +175,7 @@
         document.querySelectorAll("[data-direction]").forEach((button) => {
             button.addEventListener("click", () => {
                 uiManager.toggle_direction(button.dataset.direction);
+                updateSelectionInfo();
                 document.querySelectorAll("[data-direction]").forEach((item) => {
                     item.classList.toggle("active", item === button);
                 });
@@ -173,6 +185,7 @@
         document.querySelectorAll("[data-daytype]").forEach((button) => {
             button.addEventListener("click", () => {
                 uiManager.toggle_day_type(button.dataset.daytype);
+                updateSelectionInfo();
                 document.querySelectorAll("[data-daytype]").forEach((item) => {
                     item.classList.toggle("active", item === button);
                 });
@@ -192,6 +205,7 @@
                 element.classList.toggle("selected", offset === 1);
             });
             uiManager.wheelpicker_time(times[selectedTimeIndex]);
+            updateSelectionInfo();
         };
         timeItems.forEach((element, offset) => {
             element.addEventListener("click", () => {

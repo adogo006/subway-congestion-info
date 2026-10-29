@@ -477,6 +477,15 @@ class MapRenderer {
         this.dataManager = dataManager;
         this.onStationClick = onStationClick;
         this.showHeatMap = true;
+        this.zoom = 1;
+        this.panX = 0;
+        this.panY = 0;
+        this.mapBounds = {
+            top: 37.715133,
+            bottom: 37.413294,
+            left: 126.734086,
+            right: 127.269311,
+        };
     }
 
     // 지도를 넣을 container 요소를 찾는데 사용되는 메서드
@@ -498,9 +507,33 @@ class MapRenderer {
         //데이터를 역단위로 배열 로 변환
         const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
 
-        svg.setAttribute("viewBox", "0 0 800 500"); // 내부 좌표공간을 가로 800, 세로 500으로 설정
+        svg.setAttribute("viewBox", "0 0 970 690");
         svg.setAttribute("role", "img");
         svg.setAttribute("aria-label", "지하철 노선 지도");
+        svg.setAttribute("tabindex", "0");
+
+        const mapViewport = document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            "g",
+        );
+        const background = document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            "image",
+        );
+        background.setAttribute("x", "0");
+        background.setAttribute("y", "0");
+        background.setAttribute("width", "970");
+        background.setAttribute("height", "690");
+        background.setAttribute("preserveAspectRatio", "none");
+        background.setAttribute("href", "../data/Seoul_South_Korea_location_map.svg");
+        background.setAttribute("class", "map-background");
+        background.setAttribute("aria-hidden", "true");
+        background.setAttribute("pointer-events", "none");
+
+        const mapGroup = document.createElementNS(
+            "http://www.w3.org/2000/svg",
+            "g",
+        );
 
         const stations = line === undefined
             ? this.toArray(items)
@@ -512,59 +545,200 @@ class MapRenderer {
         })).filter(({ latitude, longitude }) => (
             Number.isFinite(latitude) && Number.isFinite(longitude)
         ));
-        const padding = 70;
-        const longitudes = coordinates.map(({ longitude }) => longitude);
-        const latitudes = coordinates.map(({ latitude }) => latitude);
-        const minLongitude = Math.min(...longitudes);
-        const maxLongitude = Math.max(...longitudes);
-        const minLatitude = Math.min(...latitudes);
-        const maxLatitude = Math.max(...latitudes);
-        const longitudeRange = maxLongitude - minLongitude || 1;
-        const latitudeRange = maxLatitude - minLatitude || 1;
         const positions = coordinates.map(({ station, latitude, longitude }) => ({
             station,
-            x: padding + ((longitude - minLongitude) / longitudeRange) * (800 - padding * 2),
-            y: padding + ((maxLatitude - latitude) / latitudeRange) * (500 - padding * 2),
+            x: ((longitude - this.mapBounds.left)
+                / (this.mapBounds.right - this.mapBounds.left)) * 970,
+            y: ((this.mapBounds.top - latitude)
+                / (this.mapBounds.top - this.mapBounds.bottom)) * 690,
         }));
 
         const routeLine = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
         routeLine.setAttribute("points", positions.map(({ x, y }) => `${x},${y}`).join(" "));
         routeLine.setAttribute("fill", "none");
         routeLine.setAttribute("stroke", "#334155");
-        routeLine.setAttribute("stroke-width", "8");
+        routeLine.setAttribute("stroke-width", "6");
+        routeLine.dataset.baseStrokeWidth = "6";
         routeLine.setAttribute("stroke-linecap", "round");
         routeLine.setAttribute("stroke-linejoin", "round");
-        svg.append(routeLine);
+        mapGroup.append(routeLine);
 
         positions.forEach(({ station, x, y }) => {
                 const point = document.createElementNS("http://www.w3.org/2000/svg", "circle");
                 point.setAttribute("cx", x);
                 point.setAttribute("cy", y);
-                point.setAttribute("r", "12");
+                point.setAttribute("r", "9");
+                point.dataset.baseRadius = "9";
                 point.setAttribute("fill", "#64748b");
                 point.setAttribute("data-station-code", station.station_code ?? "");
                 point.setAttribute("tabindex", "0");
                 point.setAttribute("role", "button");
                 point.setAttribute("aria-label", station.station_name || "역");
-                point.addEventListener("click", () => this.onStationClick?.(station));
+                point.addEventListener("click", (event) => {
+                    if (this.suppressStationClick) {
+                        event.preventDefault();
+                        return;
+                    }
+                    this.onStationClick?.(station);
+                });
                 point.addEventListener("keydown", (event) => {
                     if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
                         this.onStationClick?.(station);
                     }
                 });
-                svg.append(point);
+                mapGroup.append(point);
                 const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
                 label.setAttribute("x", x);
-                label.setAttribute("y", y + 28);
+                label.setAttribute("y", y + 24);
+                label.dataset.baseY = String(y);
+                label.dataset.baseFontSize = "11";
                 label.setAttribute("text-anchor", "middle");
                 label.setAttribute("class", "station-label");
                 label.textContent = station.station_name || "이름 없음";
-                svg.append(label);
+                mapGroup.append(label);
         });
 
+        mapViewport.append(background, mapGroup);
+        svg.append(mapViewport);
         this.container.append(svg);
+        this.attachMapInteractions(svg);
+        this.updateMapTransform(mapViewport);
+        this.updateStationAppearance(mapViewport);
         return svg;
+    }
+
+    attachMapInteractions(svg) {
+        let dragging = false;
+        let moved = false;
+        let startX = 0;
+        let startY = 0;
+        let initialPanX = 0;
+        let initialPanY = 0;
+
+        svg.addEventListener("wheel", (event) => {
+            event.preventDefault();
+            const direction = event.deltaY < 0 ? 1 : -1;
+            const previousZoom = this.zoom;
+            const nextZoom = Math.max(1, Math.min(5, previousZoom + direction * 0.25));
+            if (nextZoom === previousZoom) {
+                return;
+            }
+
+            const pointer = this.getSvgPoint(svg, event.clientX, event.clientY);
+            this.panX = pointer.x - (pointer.x - this.panX) * (nextZoom / previousZoom);
+            this.panY = pointer.y - (pointer.y - this.panY) * (nextZoom / previousZoom);
+            this.zoom = nextZoom;
+            const viewport = svg.querySelector("g");
+            this.updateMapTransform(viewport);
+            this.updateStationAppearance(viewport);
+        }, { passive: false });
+
+        svg.addEventListener("pointerdown", (event) => {
+            dragging = true;
+            moved = false;
+            startX = event.clientX;
+            startY = event.clientY;
+            initialPanX = this.panX;
+            initialPanY = this.panY;
+            svg.setPointerCapture(event.pointerId);
+            svg.classList.add("is-dragging");
+        });
+
+        svg.addEventListener("pointermove", (event) => {
+            if (!dragging) {
+                return;
+            }
+            const deltaX = event.clientX - startX;
+            const deltaY = event.clientY - startY;
+            moved = moved || Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3;
+            this.panX = initialPanX + deltaX;
+            this.panY = initialPanY + deltaY;
+            this.updateMapTransform(svg.querySelector("g"));
+        });
+
+        const stopDragging = (event) => {
+            if (!dragging) {
+                return;
+            }
+            dragging = false;
+            svg.releasePointerCapture?.(event.pointerId);
+            svg.classList.remove("is-dragging");
+            if (moved) {
+                this.suppressStationClick = true;
+                setTimeout(() => {
+                    this.suppressStationClick = false;
+                }, 0);
+            }
+        };
+        svg.addEventListener("pointerup", stopDragging);
+        svg.addEventListener("pointercancel", stopDragging);
+    }
+
+    getSvgPoint(svg, clientX, clientY) {
+        const point = svg.createSVGPoint();
+        point.x = clientX;
+        point.y = clientY;
+        return point.matrixTransform(svg.getScreenCTM().inverse());
+    }
+
+    updateStationAppearance(viewport) {
+        if (!viewport) {
+            return;
+        }
+        const routeLine = viewport.querySelector("polyline");
+        const lineWidth = Math.max(1.25, 6 / this.zoom);
+        routeLine?.setAttribute("stroke-width", String(lineWidth));
+
+        const radius = Math.max(3, 9 / this.zoom);
+        const labelFontSize = Math.max(3.5, 11 / this.zoom);
+        const labelOffset = radius + labelFontSize * 0.8 + 0.5;
+        viewport.querySelectorAll("circle").forEach((point) => {
+            point.setAttribute("r", String(radius));
+        });
+        viewport.querySelectorAll(".station-label").forEach((label) => {
+            const pointY = Number(label.dataset.baseY);
+            label.setAttribute("y", String(pointY + labelOffset));
+            label.style.fontSize = `${labelFontSize}px`;
+            label.style.strokeWidth = `${Math.max(0.5, labelFontSize * 0.25)}px`;
+        });
+    }
+
+    setTimeOfDay(time) {
+        const background = this.container?.querySelector(".map-background");
+        if (!background) {
+            return;
+        }
+
+        const hour = Number.parseInt(String(time).padStart(4, "0").slice(0, 2), 10);
+        if (!Number.isFinite(hour)) {
+            return;
+        }
+
+        background.classList.remove(
+            "map-background-dawn",
+            "map-background-day",
+            "map-background-evening",
+            "map-background-night",
+        );
+        if (hour >= 5 && hour < 9) {
+            background.classList.add("map-background-dawn");
+        } else if (hour >= 9 && hour < 17) {
+            background.classList.add("map-background-day");
+        } else if (hour >= 17 && hour < 20) {
+            background.classList.add("map-background-evening");
+        } else {
+            background.classList.add("map-background-night");
+        }
+    }
+
+    updateMapTransform(group) {
+        if (group) {
+            group.setAttribute(
+                "transform",
+                `translate(${this.panX} ${this.panY}) scale(${this.zoom})`,
+            );
+        }
     }
 
     render_heat_map(items = [], time) {
@@ -742,6 +916,7 @@ class UIManager {
         const data = this.dataManager.get_filtered_data(dataFilters);
         this.mapRenderer.render_map(data.station, this.line);
         this.mapRenderer.render_heat_map(data.congestion, time);
+        this.mapRenderer.setTimeOfDay(time);
         this.refresh_modal(data);
         return data;
     }

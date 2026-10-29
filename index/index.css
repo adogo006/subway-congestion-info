@@ -15,8 +15,10 @@ body {
 
 .container {
     width: 100%;
-    min-height: 100vh;
+    height: 100vh;
+    min-height: 0;
     padding: 20px 40px;
+    overflow: hidden;
 }
 
 /* 제목 */
@@ -43,17 +45,20 @@ body {
 /* 메인 영역 */
 
 .main {
-    display: flex;
-    justify-content: space-between;
+    display: grid;
+    grid-template-columns: 60px minmax(0, 1fr) 220px;
     position: relative;
     min-height: 0;
-    padding-top: 30px;
+    padding-top: 12px;
     gap: 20px;
 }
 
 /* 호선 선택 */
 
 .line-selector {
+    grid-column: 1;
+    grid-row: 1;
+    z-index: 1;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -62,7 +67,8 @@ body {
     border-radius: 35px;
     padding: 10px 12px;
     height: fit-content;
-    margin-top: -10px
+    margin-top: -10px;
+    background-color: white;
 }
 
 .line-btn {
@@ -90,8 +96,11 @@ body {
 /* 중앙 영역 */
 
 .center-area {
-    flex: 1 1 600px;
-    min-width: 300px;
+    grid-column: 1 / -1;
+    grid-row: 1;
+    min-width: 0;
+    width: calc(100% + 80px);
+    margin-left: -40px;
     display: flex;
     justify-content: center;
     align-items: center;
@@ -99,24 +108,61 @@ body {
 
 .station-map {
     width: 100%;
+    overflow: visible;
+    cursor: grab;
 }
 
 .station-map svg {
     display: block;
     width: 100%;
-    height: min(42vh, 300px);
+    height: calc(100vh - 160px);
+    min-height: 320px;
+    touch-action: none;
+    user-select: none;
+}
+
+.station-map svg.is-dragging {
+    cursor: grabbing;
 }
 
 .station-label {
     fill: #334155;
-    font-size: 12px;
+    font-size: 11px;
+    font-weight: 600;
+    paint-order: stroke;
+    stroke: #ffffff;
+    stroke-width: 3px;
+    stroke-linejoin: round;
     pointer-events: none;
     user-select: none;
+}
+
+.map-background {
+    transition: filter 0.4s ease;
+}
+
+.map-background-dawn {
+    filter: sepia(0.08) saturate(1.05) brightness(1.01);
+}
+
+.map-background-day {
+    filter: saturate(1.02) brightness(1.01);
+}
+
+.map-background-evening {
+    filter: sepia(0.18) saturate(1.55) hue-rotate(-48deg) brightness(0.96);
+}
+
+.map-background-night {
+    filter: brightness(0.78) saturate(0.9) contrast(1.03);
 }
 
 /* 오른쪽 선택 패널 */
 
 .right-panel {
+    grid-column: 3;
+    grid-row: 1;
+    z-index: 1;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -131,7 +177,8 @@ body {
     border: 2px solid #ddd;
     border-radius: 30px;
     padding: 10px;
-    width: 100%;
+    width: 220px;
+    background-color: white;
 }
 
 .direction-box,
@@ -151,6 +198,7 @@ body {
     display: flex;
     justify-content: center;
     gap: 5px;
+    flex-wrap: nowrap;
     margin-bottom: 10px;
 }
 
@@ -181,7 +229,7 @@ body {
 /* 시간 선택 휠 피커 */
 
 .time-picker {
-    width: 110px;
+    width: 220px;
     height: 135px;
     border: 2px solid #ddd;
     border-radius: 12px;
@@ -190,6 +238,7 @@ body {
     align-items: center;
     justify-content: center;
     overflow: hidden;
+    background-color: white;
 }
 
 .time-item {
@@ -221,11 +270,18 @@ body {
 /* 혼잡도 범례 */
 
 .legend {
+    position: fixed;
+    z-index: 3;
+    left: 0;
+    right: 0;
+    bottom: clamp(8px, 2vh, 24px);
     display: flex;
     justify-content: center;
     align-items: center;
     gap: 35px;
-    margin-top: 20px;
+    margin: 0;
+    padding: 8px 16px;
+    background-color: rgba(255, 255, 255, 0.9);
 }
 
 .legend-item {
@@ -266,8 +322,9 @@ body {
     }
 
     .main {
-        padding-top: 20px;
+        padding-top: 8px;
         gap: 12px;
+        grid-template-columns: 44px minmax(0, 1fr) 180px;
     }
 
     .line-selector {
@@ -281,7 +338,22 @@ body {
         font-size: 14px;
     }
 
+    .center-area {
+        width: calc(100% + 40px);
+        margin-left: -20px;
+    }
+
+    .station-map svg {
+        height: calc(100vh - 150px);
+        min-height: 260px;
+    }
+
     .right-panel {
+        width: 180px;
+    }
+
+    .toggle-box,
+    .time-picker {
         width: 180px;
     }
 
@@ -293,6 +365,41 @@ body {
     .legend {
         flex-wrap: wrap;
         gap: 12px 20px;
-        margin-top: 14px;
+        padding: 6px 12px;
     }
+}
+
+@media (min-height: 700px) and (min-width: 701px) {
+    .container {
+        padding-top: clamp(24px, 4vh, 48px);
+        padding-bottom: clamp(20px, 3vh, 40px);
+    }
+
+    .main {
+        padding-top: 12px;
+    }
+
+    .line-selector {
+        gap: clamp(8px, 1.2vh, 14px);
+        padding: clamp(14px, 2vh, 22px) 15px;
+    }
+
+    .line-btn {
+        width: clamp(34px, 4vh, 44px);
+        height: clamp(34px, 4vh, 44px);
+    }
+
+    .right-panel {
+        gap: clamp(18px, 3vh, 30px);
+        margin-top: clamp(20px, 4vh, 40px);
+    }
+
+    .time-picker {
+        height: clamp(140px, 20vh, 180px);
+    }
+
+    .time-item {
+        height: clamp(42px, 6vh, 54px);
+    }
+
 }
