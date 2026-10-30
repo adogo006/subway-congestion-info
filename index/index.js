@@ -183,6 +183,7 @@ class PredictionData extends Data {
             ["direction", "filter_by_direction"],
             ["station_code", "filter_by_station_code"],
             ["station_name", "filter_by_station_name"],
+            ["year", "filter_by_year"],
             ["quarter", "filter_by_quarter"],
         ];
         return this.apply_filters(this.data, filters, filterMethods);
@@ -197,7 +198,16 @@ class PredictionData extends Data {
     }
 
     filter_by_direction(items, direction) {
-        return this.filter_items(items, "drc", direction);
+        const directions = direction === "상선"
+            ? ["상선", "내선"]
+            : direction === "하선"
+                ? ["하선", "외선"]
+                : [direction];
+        return this.filter_items(
+            items,
+            "drc",
+            (item) => directions.includes(item.drc),
+        );
     }
 
     filter_by_station_code(items, stationCode) {
@@ -213,10 +223,15 @@ class PredictionData extends Data {
         return this.filter_items(items, "sttn_nm", stationName);
     }
 
+    filter_by_year(items, year) {
+        return this.filter_items(items, "yr", year);
+    }
+
     filter_by_quarter(items, quarter) {
         return this.filter_items(items, "qu", quarter);
     }
 }
+
 
 class StationData extends Data {
 
@@ -224,7 +239,6 @@ class StationData extends Data {
         super(path || "../data/station.json");
 
     }
-
 
     filter_by_station_name(items, station_name){
         return this.filter_items(items, "bldn_nm", station_name);
@@ -312,7 +326,8 @@ class DataManager {
             this.route_order_data.load_json(),
         ]);
         this.matched_station_data = this.match_station_data(
-            this.congestion_data.data,
+            //this.congestion_data.data,  혼잡도 데이터로 표시를 예측데이터로 변경
+            this.prediction_data.data,
             this.station_data.data,
         );
         return this;
@@ -905,7 +920,7 @@ class UIManager {
         const { time, ...dataFilters } = this.get_filters();
         const data = this.dataManager.get_filtered_data(dataFilters);
         this.mapRenderer.render_map(data.station, this.line);
-        this.mapRenderer.render_heat_map(data.congestion, time);
+        this.mapRenderer.render_heat_map(data.prediction, time); // prediction 데이터를 사용하도록 변경
         this.mapRenderer.setTimeOfDay(time);
         this.refresh_modal(data);
         return data;
