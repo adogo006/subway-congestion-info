@@ -140,7 +140,7 @@ class DataConverter:
 if __name__ == "__main__":
     # set the path to the CSV file
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    csv_path = os.path.join(base_dir, "[서울교통공사] 지하철혼잡도 정보.csv")
+    csv_path = os.path.join(base_dir, "data/congestion.csv")
 
     # load and parse the CSV data
     raw_data = DataConverter.load_csv(csv_path)

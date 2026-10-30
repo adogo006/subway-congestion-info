@@ -1,13 +1,3 @@
-/**
- * Subway congestion dashboard
- *
- * This file contains the four main objects used by the dashboard:
- * DataManager, MapRenderer, ModalManager, and UIManager.
- *
- * The renderer intentionally uses plain DOM/SVG APIs, so it can be used
- * before choosing a chart or map library.
- */
-
 class Data {
     constructor(path = "") {
         this.path = path;
