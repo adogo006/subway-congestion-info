@@ -1,6 +1,6 @@
 import math
 
-from data_manager.data_manager import SubwayData, SubwayList, ByQuarter
+from data_manager import SubwayData, SubwayList, ByQuarter
 from prediction_calculator import PredictionCalculator, save_prediction_json
 
 

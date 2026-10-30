@@ -153,8 +153,8 @@ if __name__ == "__main__":
     first = subway_list.items[0] # this is the way to access the SubwayData object from the SubwayList
     print(first) # it will print the formatted string representation of the SubwayData object
     # or you can access the attributes of the SubwayData object directly (Refer to the lines below)
-        # print(first.station_name, first.line, first.year, first.quarter)
-        # print(first.slot_congestion[0], first.slot_congestion[1], first.slot_congestion[5])
+    # print(first.station_name, first.line, first.year, first.quarter)
+    # print(first.slot_congestion[0], first.slot_congestion[1], first.slot_congestion[5])
     
     print("\n-------------filtered data-------------")
     filtered_list = (
