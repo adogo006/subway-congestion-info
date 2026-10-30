@@ -2,7 +2,7 @@ import json
 from collections import defaultdict
 from pathlib import Path
 
-from data_manager.data_manager import SubwayData, SubwayList
+from data_manager import SubwayData, SubwayList
 
 
 CONGESTION_TIME_KEYS = (
