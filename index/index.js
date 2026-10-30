@@ -445,7 +445,7 @@ class DataManager {
         };
     }
 
-    order_stations(stations, line) {
+    order_station_paths(stations, line) {
         const order = this.route_order_data.data?.[String(line)];
         const stationById = new Map(
             this.to_array(stations).map((station) => [
@@ -454,25 +454,31 @@ class DataManager {
             ]),
         );
         if (!order) {
-            return this.to_array(stations);
+            return [this.to_array(stations)];
         }
 
-        const ordered = [];
+        const orderedPaths = [];
         const added = new Set();
-        Object.values(order).flat().forEach((stationCode) => {
-            const normalizedCode = this.normalize_station_code(stationCode);
-            const station = stationById.get(normalizedCode);
-            if (station && !added.has(normalizedCode)) {
-                ordered.push(station);
-                added.add(normalizedCode);
+        Object.values(order).forEach((stationCodes) => {
+            const path = [];
+            stationCodes.forEach((stationCode) => {
+                const normalizedCode = this.normalize_station_code(stationCode);
+                const station = stationById.get(normalizedCode);
+                if (station && !path.includes(station)) {
+                    path.push(station);
+                    added.add(normalizedCode);
+                }
+            });
+            if (path.length > 0) {
+                orderedPaths.push(path);
             }
         });
         stationById.forEach((station, stationCode) => {
             if (!added.has(stationCode)) {
-                ordered.push(station);
+                orderedPaths.push([station]);
             }
         });
-        return ordered;
+        return orderedPaths;
     }
 }
 
@@ -540,33 +546,59 @@ class MapRenderer {
             "g",
         );
 
-        const stations = line === undefined
-            ? this.toArray(items)
-            : this.dataManager.order_stations(items, line);
-        const coordinates = stations.map((station) => ({
-            station,
-            latitude: Number(station.lat),
-            longitude: Number(station.lot),
-        })).filter(({ latitude, longitude }) => (
-            Number.isFinite(latitude) && Number.isFinite(longitude)
-        ));
-        const positions = coordinates.map(({ station, latitude, longitude }) => ({
-            station,
-            x: ((longitude - this.mapBounds.left)
-                / (this.mapBounds.right - this.mapBounds.left)) * 970,
-            y: ((this.mapBounds.top - latitude)
-                / (this.mapBounds.top - this.mapBounds.bottom)) * 690,
-        }));
+        const stationPaths = line === undefined
+            ? [this.toArray(items)]
+            : this.dataManager.order_station_paths(items, line);
+        const positionsByStation = new Map();
+        const getPosition = (station) => {
+            const stationCode = this.dataManager.normalize_station_code(
+                station.station_code,
+            );
+            if (positionsByStation.has(stationCode)) {
+                return positionsByStation.get(stationCode);
+            }
 
-        const routeLine = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
-        routeLine.setAttribute("points", positions.map(({ x, y }) => `${x},${y}`).join(" "));
-        routeLine.setAttribute("fill", "none");
-        routeLine.setAttribute("stroke", "#334155");
-        routeLine.setAttribute("stroke-width", "6");
-        routeLine.dataset.baseStrokeWidth = "6";
-        routeLine.setAttribute("stroke-linecap", "round");
-        routeLine.setAttribute("stroke-linejoin", "round");
-        mapGroup.append(routeLine);
+            const latitude = Number(station.lat);
+            const longitude = Number(station.lot);
+            if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+                return null;
+            }
+
+            const position = {
+                station,
+                x: ((longitude - this.mapBounds.left)
+                    / (this.mapBounds.right - this.mapBounds.left)) * 970,
+                y: ((this.mapBounds.top - latitude)
+                    / (this.mapBounds.top - this.mapBounds.bottom)) * 690,
+            };
+            positionsByStation.set(stationCode, position);
+            return position;
+        };
+
+        stationPaths.forEach((path) => {
+            const positions = path.map(getPosition).filter(Boolean);
+            if (positions.length < 2) {
+                return;
+            }
+
+            const routeLine = document.createElementNS(
+                "http://www.w3.org/2000/svg",
+                "polyline",
+            );
+            routeLine.setAttribute(
+                "points",
+                positions.map(({ x, y }) => `${x},${y}`).join(" "),
+            );
+            routeLine.setAttribute("fill", "none");
+            routeLine.setAttribute("stroke", "#334155");
+            routeLine.setAttribute("stroke-width", "6");
+            routeLine.dataset.baseStrokeWidth = "6";
+            routeLine.setAttribute("stroke-linecap", "round");
+            routeLine.setAttribute("stroke-linejoin", "round");
+            mapGroup.append(routeLine);
+        });
+
+        const positions = [...positionsByStation.values()];
 
         positions.forEach(({ station, x, y }) => {
                 const point = document.createElementNS("http://www.w3.org/2000/svg", "circle");
@@ -691,9 +723,10 @@ class MapRenderer {
         if (!viewport) {
             return;
         }
-        const routeLine = viewport.querySelector("polyline");
         const lineWidth = Math.max(1.25, 6 / this.zoom);
-        routeLine?.setAttribute("stroke-width", String(lineWidth));
+        viewport.querySelectorAll("polyline").forEach((routeLine) => {
+            routeLine.setAttribute("stroke-width", String(lineWidth));
+        });
 
         const radius = Math.max(3, 9 / this.zoom);
         const labelFontSize = Math.max(3.5, 11 / this.zoom);
