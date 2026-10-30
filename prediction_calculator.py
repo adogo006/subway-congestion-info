@@ -5,6 +5,59 @@ from pathlib import Path
 from data_manager.data_manager import SubwayData, SubwayList
 
 
+CONGESTION_TIME_KEYS = (
+    "hh05_mm30_aft",
+    "hh06_aft",
+    "hh06_mm30_aft",
+    "hh07_aft",
+    "hh07_mm30_aft",
+    "hh08_aft",
+    "hh08_mm30_aft",
+    "hh09_aft",
+    "hh09_mm30_aft",
+    "hh10_aft",
+    "hh10_mm30_aft",
+    "hh11_aft",
+    "hh11_mm30_aft",
+    "hh12_aft",
+    "hh12_mm30_aft",
+    "hh13_aft",
+    "hh13_mm30_aft",
+    "hh14_aft",
+    "hh14_mm30_aft",
+    "hh15_aft",
+    "hh15_mm30_aft",
+    "hh16_aft",
+    "hh16_mm30_aft",
+    "hh17_aft",
+    "hh17_mm30_aft",
+    "hh18_aft",
+    "hh18_mm30_aft",
+    "hh19_aft",
+    "hh19_mm30_aft",
+    "hh20_aft",
+    "hh20_mm30_aft",
+    "hh21_aft",
+    "hh21_mm30_aft",
+    "hh22_aft",
+    "hh22_mm30_aft",
+    "hh23_aft",
+    "hh23_mm30_aft",
+    "hh00_aft",
+    "hh00_mm30_aft",
+)
+
+
+def build_congestion_fields(slot_congestion):
+    if not isinstance(slot_congestion, list) or len(slot_congestion) != len(CONGESTION_TIME_KEYS):
+        raise ValueError(f"expected {len(CONGESTION_TIME_KEYS)} congestion time slots")
+
+    return {
+        time_key: value
+        for time_key, value in zip(CONGESTION_TIME_KEYS, slot_congestion)
+    }
+
+
 class PredictionCalculator:
     def build_prediction_data(self, history, target_year, target_quarter):
         if not isinstance(history, SubwayList):
@@ -91,15 +144,15 @@ def save_prediction_json(prediction_data, path):
     entries = []
     for item in prediction_data.items:
         entries.append({
-            "line": item.line,
-            "station_code": item.station_code,
-            "station_name": item.station_name,
-            "day_type": item.day_type,
-            "direction": item.direction,
-            "year": item.year,
-            "quarter": item.quarter,
-            "slot_congestion": item.slot_congestion
+            "lnno": item.line,
+            "sttn_no": item.station_code,
+            "sttn_nm": item.station_name,
+            "day": item.day_type,
+            "drc": item.direction,
+            "yr": item.year,
+            "qr": item.quarter,
         })
+        entries[-1].update(build_congestion_fields(item.slot_congestion))
 
     with output.open("w", encoding="utf-8") as file:
         json.dump(entries, file, ensure_ascii=False, indent=2, allow_nan=False)
