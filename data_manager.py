@@ -33,6 +33,12 @@ class SubwayList:
 
     def __len__(self):
         return len(self.items)
+    
+    # 리스트 덧셈 연산 오버로딩 구현
+    def __add__(self, other):
+        self.items += other.items
+        return self
+
 
 # SRP: 필터링 조건을 판별하는 역할을 담당한다.
 # OCP: 새로운 필터링 조건이 추가될 때 기존 코드를 수정하지 않고 자식 클래스를 추가하여 확장할 수 있다.
