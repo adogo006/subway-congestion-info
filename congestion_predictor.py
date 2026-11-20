@@ -1,13 +1,22 @@
+"""Prediction workflow: validation, historical selection and calculator delegation."""
+
+import copy
 import math
 
-from data_manager import SubwayData, SubwayList, ByQuarter
+from data_manager import SubwayData, SubwayList
 from prediction_calculator import PredictionCalculator, save_prediction_json
+from prediction_quality import PredictionQualityAnalyzer
 
 
 class CongestionPredictor:
-    def __init__(self, calculator=None):
-        # keep the calculation separate from the prediction workflow
+    """Accepts any calculator implementing build_prediction_data(history, year, quarter)."""
+
+    def __init__(self, calculator=None, quality_analyzer=None):
         self.calculator = calculator if calculator is not None else PredictionCalculator()
+        if not callable(getattr(self.calculator, "build_prediction_data", None)):
+            raise TypeError("calculator must implement build_prediction_data")
+        self.quality_analyzer = quality_analyzer if quality_analyzer is not None else PredictionQualityAnalyzer()
+        self._last_quality_report = None
 
     def validate_input(self, data, target_year, target_quarter):
         if not isinstance(data, SubwayList):
@@ -28,7 +37,6 @@ class CongestionPredictor:
                 raise ValueError(f"Record {index}: invalid quarter")
             if not isinstance(item.slot_congestion, list) or len(item.slot_congestion) != 39:
                 raise ValueError(f"Record {index}: expected 39 congestion time slots")
-
             for slot, value in enumerate(item.slot_congestion):
                 if value is not None and (
                     isinstance(value, bool)
@@ -38,26 +46,28 @@ class CongestionPredictor:
                 ):
                     raise ValueError(f"Record {index}, slot {slot}: invalid congestion value")
 
+    def _prepare_history(self, data, target_year, target_quarter):
+        history, report = self.quality_analyzer.prepare(data, target_year, target_quarter)
+        self._last_quality_report = report
+        if not history.items:
+            raise ValueError("No reliable historical profiles for selected quarter")
+        return history
+
     def select_congestion_profile(self, data, target_year, target_quarter):
-        # use the same quarter from previous years
-        same_quarter = data.filter(ByQuarter(target_quarter))
-        prior_years = [item for item in same_quarter.items if item.year < target_year]
-
-        if not prior_years:
-            raise ValueError("No historical data for the selected quarter")
-        if len({item.year for item in prior_years}) < 2:
-            raise ValueError("Prediction needs at least two historical years for this quarter")
-
-        return SubwayList(prior_years)
+        self.validate_input(data, target_year, target_quarter)
+        return self._prepare_history(data, target_year, target_quarter)
 
     def build_prediction_data(self, historical_data, target_year, target_quarter):
         return self.calculator.build_prediction_data(historical_data, target_year, target_quarter)
 
     def predict_congestion_data(self, data, target_year, target_quarter):
-        self.validate_input(data, target_year, target_quarter)
         history = self.select_congestion_profile(data, target_year, target_quarter)
         return self.build_prediction_data(history, target_year, target_quarter)
 
+    def get_quality_report(self):
+        if self._last_quality_report is None:
+            raise RuntimeError("Run a prediction or select history before requesting the quality report")
+        return copy.deepcopy(self._last_quality_report)
+
     def save_prediction_json(self, prediction_data, path):
         return save_prediction_json(prediction_data, path)
-
