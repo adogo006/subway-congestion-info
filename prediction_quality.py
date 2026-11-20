@@ -1,4 +1,3 @@
-"""Inspect and prepare historical subway data without calculating forecasts."""
 
 from collections import defaultdict
 
@@ -6,13 +5,6 @@ from data_manager import SubwayList
 
 
 class PredictionQualityAnalyzer:
-    """Apply conservative quality rules before forecasting.
-
-    A profile is identified exactly as in PredictionCalculator:
-    (line, station_code, direction, day_type).
-    Records with the same profile/year/quarter but differing data are
-    reported as conflicts rather than silently averaged or overwritten.
-    """
 
     def __init__(self, minimum_years=2):
         if not isinstance(minimum_years, int) or isinstance(minimum_years, bool) or minimum_years < 1:
@@ -39,7 +31,6 @@ class PredictionQualityAnalyzer:
         )
 
     def prepare(self, data, target_year, target_quarter):
-        """Return (clean historical SubwayList, JSON-serializable quality report)."""
         candidates = [item for item in data.items if item.quarter == target_quarter and item.year < target_year]
         grouped_by_year = defaultdict(list)
         all_profiles = set()
