@@ -1,4 +1,3 @@
-"""Run real-data validation and save reports (does not rewrite prediction.json)."""
 
 import json
 from pathlib import Path
