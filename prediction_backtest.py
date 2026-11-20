@@ -1,4 +1,3 @@
-"""Backtest predictions without training on the target year's actual data."""
 
 from collections import defaultdict
 
@@ -7,7 +6,6 @@ from prediction_quality import PredictionQualityAnalyzer
 
 
 def _unique_actuals(records):
-    """Exclude ambiguous actuals rather than choosing one arbitrarily."""
     grouped = defaultdict(list)
     for item in records:
         if PredictionQualityAnalyzer.identifiers_valid(item):
@@ -20,7 +18,6 @@ def _unique_actuals(records):
 
 
 def run_backtest(data, target_year=2026, target_quarter=1, calculator=None):
-    """Calculate MAE and last-year baseline MAE over the *same* comparable slots."""
     predictor = CongestionPredictor(calculator)
     predicted = predictor.predict_congestion_data(data, target_year, target_quarter)
     report = predictor.get_quality_report()
