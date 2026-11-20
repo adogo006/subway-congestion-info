@@ -1,4 +1,3 @@
-"""Prediction workflow: validation, historical selection and calculator delegation."""
 
 import copy
 import math
@@ -9,7 +8,6 @@ from prediction_quality import PredictionQualityAnalyzer
 
 
 class CongestionPredictor:
-    """Accepts any calculator implementing build_prediction_data(history, year, quarter)."""
 
     def __init__(self, calculator=None, quality_analyzer=None):
         self.calculator = calculator if calculator is not None else PredictionCalculator()
