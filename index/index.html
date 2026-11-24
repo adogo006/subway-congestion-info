@@ -7,7 +7,7 @@
 
     <title>subway-congestion-dashboard</title>
 
-    <link rel="stylesheet" href="./index.css?v=9">
+    <link rel="stylesheet" href="./index.css?v=10">
     
 </head>
 
@@ -105,6 +105,39 @@
 
         </main>
 
+        <!-- 역 상세 혼잡도 모달 (비차단 플로팅 대화창) -->
+        <section
+            id="station-modal"
+            class="station-modal"
+            role="dialog"
+            aria-modal="false"
+            aria-labelledby="modal-station-name"
+            hidden
+        >
+            <button
+                type="button"
+                id="modal-close"
+                class="modal-close"
+                aria-label="모달 닫기"
+            >&times;</button>
+
+            <div class="modal-header">
+                <div class="modal-title-group">
+                    <div class="modal-title-row">
+                        <span id="modal-line-badge" class="modal-line">1</span>
+                        <h2 id="modal-station-name" class="modal-station">역 상세 정보</h2>
+                        <span id="modal-level-badge" class="modal-level-badge">
+                            <span class="modal-level-dot"></span>
+                            <span class="modal-level-text">데이터 없음</span>
+                        </span>
+                    </div>
+                    <p id="modal-meta-info" class="modal-info"></p>
+                </div>
+            </div>
+
+            <div id="modal-content" class="modal-content"></div>
+        </section>
+
         <!-- 혼잡도 범례 -->
         <div class="legend">
 
@@ -132,7 +165,7 @@
 
     </div>
 
-<script src="./index.js?v=13"></script>
+<script src="./index.js?v=14"></script>
 <script>
     document.addEventListener("DOMContentLoaded", async () => {
         const {
@@ -140,17 +173,42 @@
             MapRenderer,
             ModalManager,
             UIManager,
+            OPERATING_TIME_SLOTS,
         } = window.SubwayDashboard;
 
         const dataManager = new DataManager();
-        const modalManager = new ModalManager();
-        const uiManager = new UIManager({ dataManager, modalManager });
         const selectionInfo = document.querySelector(".selection-info");
+        const timeItems = ["prevTime", "currentTime", "nextTime"]
+            .map((id) => document.getElementById(id));
+        let times = [...OPERATING_TIME_SLOTS];
+        let selectedTimeIndex = Math.max(0, times.indexOf("0600"));
+
+        const modalManager = new ModalManager({
+            modal: "#station-modal",
+            title: "#modal-station-name",
+            content: "#modal-content",
+            closeButton: "#modal-close",
+            lineBadge: "#modal-line-badge",
+            levelBadge: "#modal-level-badge",
+            metaInfo: "#modal-meta-info",
+            onSelectTime: (selectedTime) => {
+                const nextIndex = times.indexOf(selectedTime);
+                if (nextIndex !== -1) {
+                    selectedTimeIndex = nextIndex;
+                    renderTimes();
+                }
+            },
+        });
+
+        const uiManager = new UIManager({ dataManager, modalManager });
         const updateSelectionInfo = () => {
             const time = String(uiManager.time).padStart(4, "0");
+            const directionLabel = String(uiManager.line) === "2"
+                ? (uiManager.direction === "상선" ? "내선" : uiManager.direction === "하선" ? "외선" : uiManager.direction)
+                : uiManager.direction;
             selectionInfo.textContent = [
                 `${uiManager.line}호선`,
-                uiManager.direction,
+                directionLabel,
                 uiManager.day_type,
                 `${time.slice(0, 2)}:${time.slice(2)}`,
             ].join(" · ");
@@ -159,6 +217,7 @@
             container: ".station-map",
             dataManager,
             onStationClick: (station) => uiManager.click_station(station),
+            onBackgroundClick: () => uiManager.close_station_modal(),
         });
         uiManager.mapRenderer = mapRenderer;
 
@@ -192,10 +251,6 @@
             });
         });
 
-        const timeItems = ["prevTime", "currentTime", "nextTime"]
-            .map((id) => document.getElementById(id));
-        let times = [];
-        let selectedTimeIndex = 0;
         const renderTimes = () => {
             timeItems.forEach((element, offset) => {
                 const timeIndex = (selectedTimeIndex + offset - 1 + times.length)
@@ -222,16 +277,7 @@
         }, { passive: false });
         try {
             await dataManager.load_all();
-            times = [...new Set(
-                dataManager.congestion_data.data.flatMap((item) => (
-                    Object.keys(item)
-                        .filter((key) => /^hh\d{2}(?:_mm30)?_aft$/.test(key))
-                        .map((key) => key
-                            .replace(/^hh/, "")
-                            .replace("_mm30_aft", "30")
-                            .replace("_aft", "00"))
-                )),
-            )].sort((a, b) => Number(a) - Number(b));
+            times = dataManager.get_operating_times();
             selectedTimeIndex = Math.max(
                 0,
                 times.indexOf("0600"),
