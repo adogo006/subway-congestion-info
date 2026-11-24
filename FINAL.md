@@ -17,6 +17,6 @@ All 15 tests passed, and the updated code runs successfully with the real datase
 - 데이터 품질 보고서(해당 데이터가 사용되었는지 안되었는지)
 - 
 
-# 2. [DashBoard Manager]
-# 1. [Congestion Predictor fix point]
+# 2. [DashBoard Manager fix point]
+# 3. [DataManager fix point]
 # 1. [Congestion Predictor fix point]

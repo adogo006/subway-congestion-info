@@ -1,3 +1,70 @@
+const OPERATING_TIME_SLOTS = [
+    "0530", "0600", "0630", "0700", "0730", "0800", "0830", "0900", "0930",
+    "1000", "1030", "1100", "1130", "1200", "1230", "1300", "1330", "1400",
+    "1430", "1500", "1530", "1600", "1630", "1700", "1730", "1800", "1830",
+    "1900", "1930", "2000", "2030", "2100", "2130", "2200", "2230", "2300",
+    "2330", "0000", "0030",
+];
+
+function parseCongestionValue(value) {
+    if (value === null || value === undefined || value === "") {
+        return null;
+    }
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+}
+
+function getCongestionMeta(value) {
+    const numeric = parseCongestionValue(value);
+    if (numeric === null) {
+        return { level: "missing", label: "데이터 없음", color: "#64748b", value: null };
+    }
+    if (numeric >= 70) {
+        return { level: "very-high", label: "매우 혼잡", color: "#ff3030", value: numeric };
+    }
+    if (numeric >= 40) {
+        return { level: "high", label: "혼잡", color: "#f1948a", value: numeric };
+    }
+    if (numeric >= 20) {
+        return { level: "moderate", label: "보통", color: "#f4d03f", value: numeric };
+    }
+    return { level: "low", label: "원활", color: "#58d68d", value: numeric };
+}
+
+function formatTimeLabel(time) {
+    const normalized = String(time ?? "").replace(":", "").padStart(4, "0");
+    return `${normalized.slice(0, 2)}:${normalized.slice(2, 4)}`;
+}
+
+function timeSlotToKey(time) {
+    const normalizedTime = String(time ?? "").replace(":", "").padStart(4, "0");
+    const match = normalizedTime.match(/^([01]\d|2[0-3])(00|30)$/);
+    if (!match) {
+        throw new Error(`시간은 00분 또는 30분 단위의 HHMM 형식이어야 합니다: ${time}`);
+    }
+    const [, hour, minute] = match;
+    return minute === "30" ? `hh${hour}_mm30_aft` : `hh${hour}_aft`;
+}
+
+function getRecordQuarter(record) {
+    if (!record || typeof record !== "object") {
+        return null;
+    }
+    const quarter = record.qr ?? record.qu;
+    return quarter === undefined || quarter === null || quarter === "" ? null : quarter;
+}
+
+function formatDirectionLabel(line, direction, recordDirection) {
+    if (recordDirection) {
+        return recordDirection;
+    }
+    if (String(line) === "2") {
+        if (direction === "상선") return "내선";
+        if (direction === "하선") return "외선";
+    }
+    return direction || "";
+}
+
 class Data {
     constructor(path = "") {
         this.path = path;
@@ -176,7 +243,7 @@ class PredictionData extends Data {
         return super.load_json({ allowMissing: true });
     }
 
-    get_filtered_data(filters = {}) {
+    get_matching_records(filters = {}) {
         const filterMethods = [
             ["day_type", "filter_by_day_type"],
             ["line", "filter_by_line"],
@@ -187,6 +254,11 @@ class PredictionData extends Data {
             ["quarter", "filter_by_quarter"],
         ];
         return this.apply_filters(this.data, filters, filterMethods);
+    }
+
+    get_filtered_data(filters = {}) {
+        const filtered = this.get_matching_records(filters);
+        return this.select_latest_by_station(filtered);
     }
 
     filter_by_day_type(items, dayType) {
@@ -228,7 +300,36 @@ class PredictionData extends Data {
     }
 
     filter_by_quarter(items, quarter) {
-        return this.filter_items(items, "qu", quarter);
+        return this.filter_items(
+            items,
+            "qr",
+            (item) => String(getRecordQuarter(item)) === String(quarter),
+        );
+    }
+
+    select_latest_by_station(items) {
+        const latestByStation = new Map();
+        for (const item of this.filter_items(items, "sttn_no", () => true)) {
+            const stationCode = this.normalize_station_code(item.sttn_no);
+            const previous = latestByStation.get(stationCode);
+            if (!previous || this.is_newer(item, previous)) {
+                latestByStation.set(stationCode, item);
+            }
+        }
+        return [...latestByStation.values()];
+    }
+
+    is_newer(candidate, previous) {
+        const candidateYear = Number(candidate.yr) || 0;
+        const previousYear = Number(previous.yr) || 0;
+        const candidateQuarter = Number(getRecordQuarter(candidate)) || 0;
+        const previousQuarter = Number(getRecordQuarter(previous)) || 0;
+        return candidateYear > previousYear
+            || (candidateYear === previousYear && candidateQuarter >= previousQuarter);
+    }
+
+    time_to_key(time) {
+        return timeSlotToKey(time);
     }
 }
 
@@ -445,6 +546,101 @@ class DataManager {
         };
     }
 
+    get_operating_times() {
+        return [...OPERATING_TIME_SLOTS];
+    }
+
+    get_station_detail(stationOrCode, filters = {}) {
+        const isStationObject = stationOrCode && typeof stationOrCode === "object";
+        const rawCode = isStationObject
+            ? (stationOrCode.station_code ?? stationOrCode.bldn_id ?? stationOrCode.sttn_no)
+            : stationOrCode;
+        const normalizedCode = this.normalize_station_code(rawCode);
+
+        const matchedStation = this.matched_station_data.find(
+            (item) => this.normalize_station_code(item.station_code) === normalizedCode,
+        );
+        const station = isStationObject
+            ? { ...(matchedStation || {}), ...stationOrCode }
+            : (matchedStation || { station_code: String(rawCode ?? "") });
+
+        const recordFilters = {
+            day_type: filters.day_type,
+            direction: filters.direction,
+            year: filters.year,
+        };
+
+        let quarterlyPredictions = [];
+        if (Array.isArray(station.congestion_data) && station.congestion_data.length > 0) {
+            quarterlyPredictions = this.prediction_data.apply_filters(
+                station.congestion_data,
+                recordFilters,
+                [
+                    ["day_type", "filter_by_day_type"],
+                    ["direction", "filter_by_direction"],
+                    ["year", "filter_by_year"],
+                ],
+            );
+        }
+
+        if (quarterlyPredictions.length === 0 && rawCode !== undefined && rawCode !== null && rawCode !== "") {
+            quarterlyPredictions = this.prediction_data.get_matching_records({
+                ...recordFilters,
+                line: filters.line,
+                station_code: rawCode,
+            });
+        }
+
+        quarterlyPredictions = [...quarterlyPredictions].sort((a, b) => {
+            const yearDiff = (Number(a.yr) || 0) - (Number(b.yr) || 0);
+            if (yearDiff !== 0) {
+                return yearDiff;
+            }
+            return (Number(getRecordQuarter(a)) || 0) - (Number(getRecordQuarter(b)) || 0);
+        });
+
+        let prediction = null;
+        if (filters.quarter !== undefined && filters.quarter !== null && filters.quarter !== "") {
+            prediction = quarterlyPredictions.find(
+                (item) => String(getRecordQuarter(item)) === String(filters.quarter),
+            ) || null;
+        } else if (quarterlyPredictions.length > 0) {
+            prediction = quarterlyPredictions[quarterlyPredictions.length - 1];
+        }
+
+        const actualFilters = {
+            day_type: filters.day_type,
+            direction: filters.direction,
+        };
+        let actual = null;
+        if (rawCode !== undefined && rawCode !== null && rawCode !== "") {
+            actual = this.congestion_data.get_filtered_data({
+                ...actualFilters,
+                line: filters.line,
+                station_code: rawCode,
+            })[0] || this.congestion_data.get_filtered_data({
+                ...actualFilters,
+                station_code: rawCode,
+            })[0] || null;
+        }
+        if (!actual && station.station_name) {
+            actual = this.congestion_data.get_filtered_data({
+                ...actualFilters,
+                line: filters.line,
+                station_name: station.station_name,
+            })[0] || null;
+        }
+
+        return {
+            ...station,
+            station_code: station.station_code ?? String(rawCode ?? ""),
+            station_name: station.station_name || prediction?.sttn_nm || actual?.sttn_nm || "역 상세 정보",
+            prediction,
+            quarterly_predictions: quarterlyPredictions,
+            actual,
+        };
+    }
+
     order_station_paths(stations, line) {
         const order = this.route_order_data.data?.[String(line)];
         const stationById = new Map(
@@ -483,11 +679,13 @@ class DataManager {
 }
 
 class MapRenderer {
-    constructor({ container, dataManager, onStationClick } = {}) {
+    constructor({ container, dataManager, onStationClick, onBackgroundClick } = {}) {
         this.container = this.findElement(container);
         this.dataManager = dataManager;
         this.onStationClick = onStationClick;
+        this.onBackgroundClick = onBackgroundClick;
         this.showHeatMap = true;
+        this.selectedStationCode = "";
         this.zoom = 1;
         this.panX = 0;
         this.panY = 0;
@@ -506,6 +704,10 @@ class MapRenderer {
         }
         // 문자열로 받으면 직접 요소를 찾고 아닐시 요소를 그대로 사용
         return typeof element === "string" ? document.querySelector(element) : element;
+    }
+
+    hasRenderedMap() {
+        return Boolean(this.container?.querySelector?.("svg"));
     }
 
     render_map(items = this.dataManager?.matched_station_data, line) {
@@ -612,15 +814,16 @@ class MapRenderer {
                 point.setAttribute("role", "button");
                 point.setAttribute("aria-label", station.station_name || "역");
                 point.addEventListener("click", (event) => {
+                    event.stopPropagation?.();
                     if (this.suppressStationClick) {
-                        event.preventDefault();
+                        event.preventDefault?.();
                         return;
                     }
                     this.onStationClick?.(station);
                 });
                 point.addEventListener("keydown", (event) => {
                     if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
+                        event.preventDefault?.();
                         this.onStationClick?.(station);
                     }
                 });
@@ -642,12 +845,14 @@ class MapRenderer {
         this.attachMapInteractions(svg);
         this.updateMapTransform(mapViewport);
         this.updateStationAppearance(mapViewport);
+        this.setSelectedStation(this.selectedStationCode);
         return svg;
     }
 
     attachMapInteractions(svg) {
         let dragging = false;
         let moved = false;
+        let pointerCaptured = false;
         let startX = 0;
         let startY = 0;
         let initialPanX = 0;
@@ -674,12 +879,11 @@ class MapRenderer {
         svg.addEventListener("pointerdown", (event) => {
             dragging = true;
             moved = false;
+            pointerCaptured = false;
             startX = event.clientX;
             startY = event.clientY;
             initialPanX = this.panX;
             initialPanY = this.panY;
-            svg.setPointerCapture(event.pointerId);
-            svg.classList.add("is-dragging");
         });
 
         svg.addEventListener("pointermove", (event) => {
@@ -688,7 +892,17 @@ class MapRenderer {
             }
             const deltaX = event.clientX - startX;
             const deltaY = event.clientY - startY;
-            moved = moved || Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3;
+            if (!moved && (Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3)) {
+                moved = true;
+                if (!pointerCaptured) {
+                    svg.setPointerCapture?.(event.pointerId);
+                    pointerCaptured = true;
+                }
+                svg.classList.add("is-dragging");
+            }
+            if (!moved) {
+                return;
+            }
             this.panX = initialPanX + deltaX;
             this.panY = initialPanY + deltaY;
             this.updateMapTransform(svg.querySelector("g"));
@@ -699,7 +913,10 @@ class MapRenderer {
                 return;
             }
             dragging = false;
-            svg.releasePointerCapture?.(event.pointerId);
+            if (pointerCaptured) {
+                svg.releasePointerCapture?.(event.pointerId);
+                pointerCaptured = false;
+            }
             svg.classList.remove("is-dragging");
             if (moved) {
                 this.suppressStationClick = true;
@@ -710,6 +927,40 @@ class MapRenderer {
         };
         svg.addEventListener("pointerup", stopDragging);
         svg.addEventListener("pointercancel", stopDragging);
+
+        svg.addEventListener("click", (event) => {
+            if (this.suppressStationClick) {
+                return;
+            }
+            const target = event?.target;
+            const clickedStation = Boolean(
+                target?.closest?.("circle[data-station-code]")
+                || target?.dataset?.stationCode
+                || target?.getAttribute?.("data-station-code"),
+            );
+            if (clickedStation) {
+                return;
+            }
+            this.onBackgroundClick?.(event);
+        });
+    }
+
+    setSelectedStation(stationCode = "") {
+        this.selectedStationCode = stationCode ? String(stationCode) : "";
+        const normalizedTarget = this.selectedStationCode
+            ? this.dataManager?.normalize_station_code(this.selectedStationCode)
+            : "";
+        const points = this.container?.querySelectorAll?.("circle") || [];
+        points.forEach((point) => {
+            const code = point.dataset?.stationCode
+                ?? point.getAttribute?.("data-station-code")
+                ?? "";
+            const isSelected = Boolean(
+                normalizedTarget
+                && this.dataManager?.normalize_station_code(code) === normalizedTarget,
+            );
+            point.classList?.toggle("is-selected", isSelected);
+        });
     }
 
     getSvgPoint(svg, clientX, clientY) {
@@ -784,7 +1035,7 @@ class MapRenderer {
             return;
         }
 
-        const timeKey = this.dataManager?.congestion_data?.time_to_key(time);
+        const timeKey = timeSlotToKey(time);
         const congestionByStation = new Map();
 
         this.toArray(items).forEach((item) => {
@@ -819,41 +1070,168 @@ class MapRenderer {
 
     // 혼잡도 별로 색상을 설정
     getCongestionColor(value) {
-        const congestion = Number(value);
-        if (Number.isNaN(congestion)) {
-            return "#64748b";
-        }
-        if (congestion >= 70) return "#dc2626";
-        if (congestion >= 40) return "#f97316";
-        if (congestion >= 20) return "#eab308";
-        return "#22c55e";
+        return getCongestionMeta(value).color;
     }
 }
 
 class ModalManager {
-    constructor({ modal, title, content } = {}) {
+    constructor({
+        modal,
+        title,
+        content,
+        closeButton,
+        lineBadge,
+        levelBadge,
+        metaInfo,
+        onClose,
+        onSelectTime,
+    } = {}) {
         this.modal = this.findElement(modal) || this.createModal();
-        this.title = this.findElement(title, this.modal);
-        this.content = this.findElement(content, this.modal);
+        this.title = this.findElement(title, this.modal)
+            || this.modal?.querySelector?.(".modal-station")
+            || this.modal?.querySelector?.("h2")
+            || null;
+        this.content = this.findElement(content, this.modal)
+            || this.modal?.querySelector?.(".modal-content")
+            || this.modal?.querySelector?.("div")
+            || null;
+        this.closeButton = this.findElement(closeButton, this.modal)
+            || this.modal?.querySelector?.(".modal-close")
+            || null;
+        this.lineBadge = this.findElement(lineBadge, this.modal)
+            || this.modal?.querySelector?.(".modal-line")
+            || null;
+        this.levelBadge = this.findElement(levelBadge, this.modal)
+            || this.modal?.querySelector?.(".modal-level-badge")
+            || null;
+        this.metaInfo = this.findElement(metaInfo, this.modal)
+            || this.modal?.querySelector?.(".modal-info")
+            || null;
+        this.onClose = onClose || null;
+        this.onSelectTime = onSelectTime || null;
         this.is_open = false;
         this.station_code = "";
+        this.current_station = null;
+        this.current_filters = {};
+        this._bindEvents();
     }
 
-    findElement(element, parent = document) {
-        if (!element) return null;
-        return typeof element === "string" ? parent.querySelector(element) : element;
+    findElement(element, parent = typeof document !== "undefined" ? document : null) {
+        if (!element || !parent) return null;
+        return typeof element === "string" ? parent.querySelector?.(element) : element;
     }
 
     createModal() {
+        if (typeof document === "undefined") {
+            return null;
+        }
         const modal = document.createElement("section");
-        const title = document.createElement("h2");
-        const content = document.createElement("div");
-        modal.append(title, content);
+        modal.className = "station-modal";
         modal.hidden = true;
         modal.setAttribute("role", "dialog");
-        modal.setAttribute("aria-modal", "true");
-        document.body.append(modal);
+        modal.setAttribute("aria-modal", "false");
+
+        const closeButton = document.createElement("button");
+        closeButton.type = "button";
+        closeButton.className = "modal-close";
+        closeButton.setAttribute("aria-label", "모달 닫기");
+        closeButton.textContent = "×";
+
+        const header = document.createElement("div");
+        header.className = "modal-header";
+
+        const titleGroup = document.createElement("div");
+        titleGroup.className = "modal-title-group";
+
+        const titleRow = document.createElement("div");
+        titleRow.className = "modal-title-row";
+
+        const lineBadge = document.createElement("span");
+        lineBadge.className = "modal-line";
+
+        const title = document.createElement("h2");
+        title.className = "modal-station";
+
+        const levelBadge = document.createElement("span");
+        levelBadge.className = "modal-level-badge";
+        const levelDot = document.createElement("span");
+        levelDot.className = "modal-level-dot";
+        const levelText = document.createElement("span");
+        levelText.className = "modal-level-text";
+        levelBadge.append(levelDot, levelText);
+
+        titleRow.append(lineBadge, title, levelBadge);
+
+        const metaInfo = document.createElement("p");
+        metaInfo.className = "modal-info";
+
+        titleGroup.append(titleRow, metaInfo);
+        header.append(titleGroup);
+
+        const content = document.createElement("div");
+        content.className = "modal-content";
+
+        modal.append(closeButton, header, content);
+        document.body?.append(modal);
         return modal;
+    }
+
+    _bindEvents() {
+        if (this.closeButton) {
+            this.closeButton.addEventListener("click", (event) => {
+                event?.stopPropagation?.();
+                this.close_modal();
+            });
+        }
+        if (typeof document !== "undefined" && document.addEventListener) {
+            this._keydownHandler = (event) => {
+                if (this.is_open && event.key === "Escape") {
+                    this.close_modal();
+                }
+            };
+            document.addEventListener("keydown", this._keydownHandler);
+        }
+    }
+
+    resolveStationRows(station = {}, filters = {}) {
+        const directQuarterly = Array.isArray(station.quarterly_predictions)
+            ? station.quarterly_predictions
+            : null;
+        let quarterlyPredictions = directQuarterly;
+        if (!quarterlyPredictions) {
+            const rawRows = Array.isArray(station.congestion_data)
+                ? station.congestion_data
+                : (station.congestion_data ? [station.congestion_data] : []);
+            const { quarter, ...baseFilters } = filters;
+            quarterlyPredictions = rawRows
+                .filter((row) => this.matches_filters(row, baseFilters))
+                .sort((a, b) => {
+                    const yearDiff = (Number(a.yr) || 0) - (Number(b.yr) || 0);
+                    if (yearDiff !== 0) return yearDiff;
+                    return (Number(getRecordQuarter(a)) || 0) - (Number(getRecordQuarter(b)) || 0);
+                });
+        }
+
+        let prediction = station.prediction || null;
+        if (!prediction && quarterlyPredictions.length > 0) {
+            if (filters.quarter !== undefined && filters.quarter !== null && filters.quarter !== "") {
+                prediction = quarterlyPredictions.find(
+                    (row) => String(getRecordQuarter(row)) === String(filters.quarter),
+                ) || null;
+            } else {
+                prediction = quarterlyPredictions[quarterlyPredictions.length - 1];
+            }
+        }
+        if (!prediction && Array.isArray(station.congestion_data) && station.congestion_data.length > 0) {
+            prediction = station.congestion_data.find((row) => this.matches_filters(row, filters))
+                || null;
+        }
+
+        return {
+            prediction,
+            quarterlyPredictions,
+            actual: station.actual || null,
+        };
     }
 
     open_modal(station, filters = {}) {
@@ -861,22 +1239,70 @@ class ModalManager {
         station = station || {};
         this.is_open = true;
         this.station_code = station.station_code || "";
+        this.current_station = station;
+        this.current_filters = { ...filters };
         this.modal.hidden = false;
+
+        const selectedTime = String(filters.time || "0600").replace(":", "").padStart(4, "0");
+        const timeKey = timeSlotToKey(selectedTime);
+        const { prediction, quarterlyPredictions, actual } = this.resolveStationRows(station, filters);
+        const predictedMeta = getCongestionMeta(prediction ? prediction[timeKey] : null);
+
+        if (this.lineBadge) {
+            this.lineBadge.textContent = String(filters.line ?? prediction?.lnno ?? "");
+        }
         if (this.title) {
-            this.title.textContent = station.station_name || "역 상세 정보";
+            this.title.textContent = station.station_name || prediction?.sttn_nm || "역 상세 정보";
+        }
+        if (this.levelBadge) {
+            const dot = this.levelBadge.querySelector?.(".modal-level-dot");
+            const text = this.levelBadge.querySelector?.(".modal-level-text");
+            if (dot) {
+                dot.style.backgroundColor = predictedMeta.color;
+            }
+            if (text) {
+                text.textContent = predictedMeta.label;
+            } else {
+                this.levelBadge.textContent = predictedMeta.label;
+            }
+        }
+        if (this.metaInfo) {
+            const directionText = formatDirectionLabel(
+                filters.line ?? prediction?.lnno,
+                filters.direction,
+                prediction?.drc,
+            );
+            const quarter = getRecordQuarter(prediction);
+            const periodTag = prediction?.yr
+                ? `${prediction.yr}${quarter ? ` Q${quarter}` : ""} 예측`
+                : "예측 데이터 없음";
+            const parts = [
+                directionText,
+                filters.day_type || prediction?.day || "",
+                formatTimeLabel(selectedTime),
+            ].filter(Boolean);
+            this.metaInfo.textContent = `${parts.join(" · ")} (${periodTag})`;
         }
         if (this.content) {
             this.content.textContent = "";
-            this.render_charts(station, filters);
+            this.render_charts(
+                { ...station, prediction, quarterly_predictions: quarterlyPredictions, actual },
+                { ...filters, time: selectedTime },
+            );
         }
     }
 
-    close_modal() {
+    close_modal({ notify = true } = {}) {
+        const wasOpen = this.is_open;
         if (this.modal) {
             this.modal.hidden = true;
         }
         this.is_open = false;
         this.station_code = "";
+        this.current_station = null;
+        if (notify && wasOpen) {
+            this.onClose?.();
+        }
     }
 
     refresh_modal(station, filters = {}) {
@@ -887,29 +1313,198 @@ class ModalManager {
 
     render_charts(station, filters = {}) {
         if (!this.content) return;
-        const rows = Array.isArray(station.congestion_data)
-            ? station.congestion_data
-            : [station.congestion_data];
-        const congestionRow = rows.find((row) => (
-            this.matches_filters(row, filters)
-        )) || rows[0];
-        const values = station.congestion_history
-            || station.congestion
-            || Object.entries(congestionRow || {})
-                .filter(([key, value]) => key.startsWith("hh") && value !== null)
-                .map(([, value]) => value);
+        const selectedTime = String(filters.time || "0600").replace(":", "").padStart(4, "0");
+        const timeKey = timeSlotToKey(selectedTime);
+        const { prediction, quarterlyPredictions, actual } = this.resolveStationRows(station, filters);
+
+        const predictedMeta = getCongestionMeta(prediction ? prediction[timeKey] : null);
+        const actualMeta = getCongestionMeta(actual ? actual[timeKey] : null);
+
+        // 1. 현재 시간대 예상 vs 최신 실측 비교 영역
+        const comparisonSection = document.createElement("div");
+        comparisonSection.className = "modal-comparison";
+
+        const summaryRow = document.createElement("div");
+        summaryRow.className = "modal-summary-row";
+
+        const predictionValueEl = document.createElement("span");
+        predictionValueEl.className = "modal-prediction-value";
+        predictionValueEl.textContent = predictedMeta.value !== null
+            ? `${predictedMeta.value.toFixed(1)}%`
+            : "데이터 없음";
+
+        const deltaEl = document.createElement("span");
+        deltaEl.className = "modal-delta";
+        if (predictedMeta.value !== null && actualMeta.value !== null) {
+            const diff = Number((predictedMeta.value - actualMeta.value).toFixed(1));
+            if (diff > 0) {
+                deltaEl.classList.add("is-up");
+                deltaEl.textContent = `▲ +${diff.toFixed(1)}%p (실측 대비)`;
+            } else if (diff < 0) {
+                deltaEl.classList.add("is-down");
+                deltaEl.textContent = `▼ ${diff.toFixed(1)}%p (실측 대비)`;
+            } else {
+                deltaEl.textContent = "변동 없음 (실측 대비)";
+            }
+        } else {
+            deltaEl.textContent = actualMeta.value === null ? "실측 비교 없음" : "";
+        }
+        summaryRow.append(predictionValueEl, deltaEl);
+        comparisonSection.append(summaryRow);
+
+        const scaleMax = Math.max(
+            100,
+            predictedMeta.value ?? 0,
+            actualMeta.value ?? 0,
+        );
+        const compareList = document.createElement("div");
+        compareList.className = "modal-compare-list";
+
+        const predQuarter = getRecordQuarter(prediction);
+        const predLabel = prediction?.yr
+            ? `예상 혼잡도 (${prediction.yr}${predQuarter ? ` Q${predQuarter}` : ""})`
+            : "예상 혼잡도";
+        const actualQuarter = getRecordQuarter(actual);
+        const actualLabel = actual?.yr
+            ? `기존 실측 (${actual.yr}${actualQuarter ? ` Q${actualQuarter}` : ""})`
+            : "기존 실측";
+
+        compareList.append(
+            this._createCompareBar(predLabel, predictedMeta, scaleMax, "predicted-bar"),
+            this._createCompareBar(actualLabel, actualMeta, scaleMax, "existing-bar"),
+        );
+        comparisonSection.append(compareList);
+        this.content.append(comparisonSection);
+
+        // 2. 39슬롯 시간대별 예측 혼잡도 미니 차트 (05:30 ~ 00:30)
+        const timelineSection = document.createElement("div");
+        timelineSection.className = "modal-timeline";
+
+        const timelineTitle = document.createElement("p");
+        timelineTitle.className = "modal-section-title";
+        timelineTitle.textContent = "시간대별 예측 혼잡도 (05:30 ~ 00:30)";
+        timelineSection.append(timelineTitle);
+
+        const slotEntries = OPERATING_TIME_SLOTS.map((slot) => {
+            const key = timeSlotToKey(slot);
+            const rawValue = prediction ? prediction[key] : null;
+            return {
+                slot,
+                label: formatTimeLabel(slot),
+                meta: getCongestionMeta(rawValue),
+            };
+        });
+
+        const validEntries = slotEntries.filter((entry) => entry.meta.value !== null);
+        const maxSlotValue = validEntries.reduce(
+            (acc, entry) => Math.max(acc, entry.meta.value),
+            100,
+        );
+
         const chart = document.createElement("div");
         chart.className = "congestion-chart";
 
-        const data = Array.isArray(values) ? values : [values];
-        data.forEach((value, index) => {
-        const bar = document.createElement("div");
-        bar.className = "congestion-bar";
-        bar.style.height = `${Math.max(4, Math.min(Number(value) || 0, 200) / 2)}px`;
-        bar.title = `${index + 1}: ${value}`;
-        chart.append(bar);
+        slotEntries.forEach(({ slot, label, meta }) => {
+            const bar = document.createElement("button");
+            bar.type = "button";
+            bar.className = "congestion-bar";
+            bar.dataset.time = slot;
+            if (slot === selectedTime) {
+                bar.classList.add("is-selected");
+            }
+            if (meta.value === null) {
+                bar.classList.add("is-missing");
+                bar.style.height = "6px";
+                bar.style.backgroundColor = meta.color;
+                bar.title = `${label} · 데이터 없음`;
+            } else {
+                const heightPx = Math.max(4, Math.round((meta.value / maxSlotValue) * 66));
+                bar.style.height = `${heightPx}px`;
+                bar.style.backgroundColor = meta.color;
+                bar.title = `${label} · ${meta.value.toFixed(1)}% (${meta.label})`;
+            }
+            bar.setAttribute("aria-label", bar.title);
+            if (this.onSelectTime) {
+                bar.addEventListener("click", (event) => {
+                    event?.stopPropagation?.();
+                    this.onSelectTime(slot);
+                });
+            }
+            chart.append(bar);
         });
-        this.content.append(chart);
+        timelineSection.append(chart);
+
+        const axis = document.createElement("div");
+        axis.className = "chart-axis";
+        ["05:30", "09:00", "13:00", "18:00", "22:00", "00:30"].forEach((tickText) => {
+            const tick = document.createElement("span");
+            tick.textContent = tickText;
+            axis.append(tick);
+        });
+        timelineSection.append(axis);
+
+        const extremes = document.createElement("p");
+        extremes.className = "modal-extremes";
+        if (validEntries.length > 0) {
+            const peak = validEntries.reduce((a, b) => (b.meta.value > a.meta.value ? b : a));
+            const low = validEntries.reduce((a, b) => (b.meta.value < a.meta.value ? b : a));
+            extremes.textContent = `최대 ${peak.label} (${peak.meta.value.toFixed(1)}%) · 최소 ${low.label} (${low.meta.value.toFixed(1)}%)`;
+        } else {
+            extremes.textContent = "선택한 조건의 시간대별 예측 데이터가 없습니다.";
+        }
+        timelineSection.append(extremes);
+        this.content.append(timelineSection);
+
+        // 3. 분기별 예측 요약 (Q1 ~ Q4)
+        if (quarterlyPredictions.length > 0) {
+            const quartersSection = document.createElement("div");
+            quartersSection.className = "modal-quarters";
+            const activeQuarter = getRecordQuarter(prediction);
+
+            quarterlyPredictions.forEach((row) => {
+                const quarter = getRecordQuarter(row);
+                const qMeta = getCongestionMeta(row[timeKey]);
+                const chip = document.createElement("div");
+                chip.className = "quarter-chip";
+                if (activeQuarter !== null && String(quarter) === String(activeQuarter)) {
+                    chip.classList.add("is-active");
+                }
+                const qLabel = document.createElement("span");
+                qLabel.textContent = quarter ? `Q${quarter}` : String(row.yr || "-");
+                const qVal = document.createElement("strong");
+                qVal.textContent = qMeta.value !== null ? `${qMeta.value.toFixed(1)}%` : "-";
+                chip.append(qLabel, qVal);
+                quartersSection.append(chip);
+            });
+            this.content.append(quartersSection);
+        }
+    }
+
+    _createCompareBar(labelText, meta, scaleMax, barClass) {
+        const item = document.createElement("div");
+        item.className = "chart-item";
+
+        const label = document.createElement("div");
+        label.className = "chart-label";
+        const nameSpan = document.createElement("span");
+        nameSpan.textContent = labelText;
+        const valStrong = document.createElement("strong");
+        valStrong.textContent = meta.value !== null ? `${meta.value.toFixed(1)}%` : "데이터 없음";
+        label.append(nameSpan, valStrong);
+
+        const track = document.createElement("div");
+        track.className = "chart-track";
+        const fill = document.createElement("div");
+        fill.className = `chart-fill ${barClass}`;
+        const widthPct = meta.value !== null
+            ? Math.max(2, Math.min(100, (meta.value / scaleMax) * 100))
+            : 0;
+        fill.style.width = `${widthPct.toFixed(1)}%`;
+        fill.style.backgroundColor = meta.color;
+        track.append(fill);
+
+        item.append(label, track);
+        return item;
     }
 
     matches_filters(row, filters) {
@@ -920,10 +1515,11 @@ class ModalManager {
             || filters.direction === row.drc
             || (filters.direction === "상선" && row.drc === "내선")
             || (filters.direction === "하선" && row.drc === "외선");
+        const rowQuarter = getRecordQuarter(row);
         return (filters.year === undefined || String(row.yr) === String(filters.year))
             && (filters.day_type === undefined || row.day === filters.day_type)
             && directionMatches
-            && (filters.quarter === undefined || String(row.qu) === String(filters.quarter));
+            && (filters.quarter === undefined || String(rowQuarter) === String(filters.quarter));
     }
 }
 
@@ -932,41 +1528,92 @@ class UIManager {
         this.dataManager = dataManager;
         this.mapRenderer = mapRenderer;
         this.modalManager = modalManager;
-        this.day_type = "평일"; // 평일 아니면 주말
-        this.time = "0000"; // 1500 처럼 총 4개의 숫자로 받을 수 있다.
+        this.day_type = "평일"; // 평일, 토요일, 일요일
+        this.time = "0600"; // 1500 처럼 총 4개의 숫자로 받을 수 있다.
         this.line = "1"; // 기본 1호선으로 설정
         this.direction = "상선";
+        this.quarter = undefined;
         this.station_code = "";
+        this.selected_station_code = "";
+        this.selected_station = null;
+        this.rendered_line = null;
+
+        if (this.modalManager) {
+            const existingOnClose = this.modalManager.onClose;
+            this.modalManager.onClose = () => {
+                this.handle_modal_closed();
+                existingOnClose?.();
+            };
+        }
     }
 
     get_filters() {
-        return {
-        day_type: this.day_type,
-        time: this.time,
-        line: this.line,
-        direction: this.direction,
-        station_code: this.station_code,
+        const filters = {
+            day_type: this.day_type,
+            time: this.time,
+            line: this.line,
+            direction: this.direction,
         };
+        if (this.quarter !== undefined && this.quarter !== null && this.quarter !== "") {
+            filters.quarter = this.quarter;
+        }
+        return filters;
     }
 
-    refresh() {
+    handle_modal_closed() {
+        this.selected_station_code = "";
+        this.selected_station = null;
+        this.station_code = "";
+        this.mapRenderer?.setSelectedStation?.("");
+    }
+
+    close_station_modal() {
+        this.handle_modal_closed();
+        if (this.modalManager?.is_open) {
+            this.modalManager.close_modal({ notify: false });
+        }
+    }
+
+    get_station_detail(station) {
+        const filters = this.get_filters();
+        if (this.dataManager?.get_station_detail) {
+            return this.dataManager.get_station_detail(station, filters);
+        }
+        return station;
+    }
+
+    refresh({ forceMapRender = false } = {}) {
         const { time, ...dataFilters } = this.get_filters();
         const data = this.dataManager.get_filtered_data(dataFilters);
-        this.mapRenderer.render_map(data.station, this.line);
-        this.mapRenderer.render_heat_map(data.prediction, time); // prediction 데이터를 사용하도록 변경
-        this.mapRenderer.setTimeOfDay(time);
+        const lineKey = String(this.line);
+        const shouldRenderMap = forceMapRender
+            || this.rendered_line !== lineKey
+            || !this.mapRenderer?.hasRenderedMap?.();
+
+        if (shouldRenderMap && this.mapRenderer) {
+            this.mapRenderer.render_map(data.station, this.line);
+            this.rendered_line = lineKey;
+        }
+        this.mapRenderer?.render_heat_map(data.prediction, time);
+        this.mapRenderer?.setTimeOfDay(time);
+        this.mapRenderer?.setSelectedStation?.(this.selected_station_code);
         this.refresh_modal(data);
         return data;
     }
 
     click_station(station) {
-        this.station_code = station.station_code;
-        const data = this.refresh();
-        const selectedStation = data.station.find(
-            (item) => item.station_code === this.station_code,
-        ) || station;
-        this.modalManager.open_modal(selectedStation, this.get_filters());
-        return data;
+        if (!station) {
+            this.close_station_modal();
+            return null;
+        }
+        this.selected_station_code = station.station_code ?? "";
+        this.selected_station = station;
+        this.station_code = this.selected_station_code;
+        this.mapRenderer?.setSelectedStation?.(this.selected_station_code);
+
+        const detail = this.get_station_detail(station);
+        this.modalManager?.open_modal(detail, this.get_filters());
+        return detail;
     }
 
     toggle_day_type(value) {
@@ -975,12 +1622,18 @@ class UIManager {
     }
 
     toggle_line(value) {
+        this.close_station_modal();
         this.line = value;
-        return this.refresh();
+        return this.refresh({ forceMapRender: true });
     }
 
     toggle_direction(value) {
         this.direction = value;
+        return this.refresh();
+    }
+
+    toggle_quarter(value) {
+        this.quarter = value;
         return this.refresh();
     }
 
@@ -993,19 +1646,46 @@ class UIManager {
         if (!this.modalManager?.is_open) {
             return;
         }
-        const selectedStation = data.station.find(
-            (item) => item.station_code === this.modalManager.station_code,
-        );
+        const targetCode = this.selected_station_code || this.modalManager.station_code;
+        const normalizedTarget = this.dataManager?.normalize_station_code
+            ? this.dataManager.normalize_station_code(targetCode)
+            : String(targetCode);
+        const selectedStation = data?.station?.find((item) => {
+            const itemCode = this.dataManager?.normalize_station_code
+                ? this.dataManager.normalize_station_code(item.station_code)
+                : String(item.station_code);
+            return itemCode === normalizedTarget;
+        }) || this.selected_station;
+
         if (selectedStation) {
-            this.modalManager.refresh_modal(selectedStation, this.get_filters());
+            this.selected_station = selectedStation;
+            const detail = this.get_station_detail(selectedStation);
+            this.modalManager.refresh_modal(detail, this.get_filters());
+        } else {
+            this.close_station_modal();
         }
     }
 }
 
-// Expose the classes for the HTML page and for browser-console experimentation.
-window.SubwayDashboard = {
-  DataManager,
-  MapRenderer,
-  ModalManager,
-  UIManager,
+const SubwayDashboard = {
+    Data,
+    CongestionData,
+    PredictionData,
+    StationData,
+    DataManager,
+    MapRenderer,
+    ModalManager,
+    UIManager,
+    OPERATING_TIME_SLOTS,
+    getCongestionMeta,
+    formatTimeLabel,
 };
+
+// Expose the classes for the HTML page and for browser-console experimentation.
+if (typeof window !== "undefined") {
+    window.SubwayDashboard = SubwayDashboard;
+}
+
+if (typeof module !== "undefined" && module.exports) {
+    module.exports = SubwayDashboard;
+}
