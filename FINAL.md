@@ -1,7 +1,8 @@
 # Subway Congestion Info — 최종 시스템 아키텍처 · 데이터 · 메서드 플로우 분석 (`FINAL.md`)
 
-> **분석 기준 커밋**: `main` (`2a3e135`, PR #1 ~ #4 전체 병합 완료)  
+> **분석 기준**: `feature/final-branch` (`67cfba9` + 현재 분기 예측 우선 표시 · 전년도 동분기 실측 비교 · 프론트엔드 Phase 1 SOLID 리팩터링 반영)  
 > **백엔드 자동화 테스트**: `python3 -m unittest discover -s tests` — **20/20 통과**  
+> **프론트엔드 자동화 테스트**: `node --test index/modal.test.js` — **15개 테스트** (모달·다중 연도 우선 선택·전년 동분기 실측 매칭·SOLID OCP/DIP/LSP/규칙 단일화·실데이터 통합)  
 > **백테스트 성능 (2026 Q1)**: 비교 프로필 1,641개 / 62,905 슬롯, **MAE `2.2422`** (직전 연도 베이스라인 `2.3855` 대비 개선)
 
 ---
@@ -18,12 +19,13 @@
 | **PR #2** | `feature/trend-aware-prediction` | `PredictionCalculator`를 **가중평균 + 감쇠 선형 추세(WLS)** 예측기로 고도화, `tests/test_prediction_calculator.py` 추가 |
 | **PR #3** | `feature/data-manager` | `data_manager.py` 미사용 필터 제거 및 `SubwayList.__add__` 비파괴적 반환 수정, `main.py` `import os` 명시, `data/README.md` 이동 |
 | **PR #4** | `index-js-final` | 비차단 플로팅 `ModalManager` 복구 및 상세 시각화(예상 vs 실측 비교 바, 39슬롯 차트, Q1~Q4 칩), 호선 변경 시에만 SVG 재생성 분리, 결측치 색상 수정 |
+| **후속 반영** | `feature/final-branch` | `main.py`·`data/prediction.json`에 **`2026 Q4` 예측 추가**(총 5분기 8,268건), 프론트 현재 연도·분기(`2026 Q4`) 우선 선택, 비교군 실측 **전년도 동분기(`2025 Q4`) 3단계 우선 매칭**, Phase 1 SOLID 리팩터링(`CongestionGradeClassifier` 추출·DI, `Data` `fetcher` 및 `DataManager` 생성자 DI, `SubwayRecordData` 공통 부모 추출, 노선/방향 매핑 테이블 단일화) |
 
 ### 1.2 모듈 구성표
 
 | 계층 | 파일 | 주요 역할 |
 | --- | --- | --- |
-| **백엔드 엔트리** | `main.py` | CSV 로드 → 2027 Q1~Q4 예측 실행 → `data/prediction.json` 저장 |
+| **백엔드 엔트리** | `main.py` | CSV 로드 → **`2026 Q4` + `2027 Q1~Q4`**(5개 분기) 예측 실행 → `data/prediction.json` 저장 |
 | **도메인 / 파싱** | `data_manager.py` | `SubwayData`, `SubwayList`, `DataConverter`(`load_csv`, `parse_data`) |
 | **예측 오케스트레이션** | `congestion_predictor.py` | `CongestionPredictor`: 입력 검증, 품질 분석기·계산기 주입(DI), 예측·저장 조율 |
 | **품질 필터링** | `prediction_quality.py` | `PredictionQualityAnalyzer`: 분기/연도 필터, 식별자·중복·충돌·최소 이력 검증 및 리포트 생성 |
@@ -57,7 +59,7 @@ flowchart TD
     end
 
     subgraph Assets["2. 정적 데이터셋 (data/)"]
-        PJ["data/prediction.json\n(예측 혼잡도, qr 키)"]
+        PJ["data/prediction.json\n(8,268건: 2026 Q4 + 2027 Q1~Q4, qr 키)"]
         CJ["data/congestion.json\n(과거 실측 23,316건, qu 키)"]
         SJ["data/station.json\n(784개 역 위경도)"]
         RO["data/route_order.json\n(1~8호선 정차 순서)"]
@@ -69,10 +71,10 @@ flowchart TD
         FETCH["DataManager.load_all()\n4개 JSON 병렬 fetch"]
         MATCH["DataManager.match_station_data()\nprediction + station 좌표 매칭"]
         UI["UIManager\n호선·방향·요일·시간·선택역 상태 관리"]
-        FILT["DataManager.get_filtered_data()\n최신 분기 단건 추출 + 노선 역 필터"]
-        DETAIL["DataManager.get_station_detail()\n역별 예측·분기목록·최신 실측 결합"]
+        FILT["DataManager.get_filtered_data()\n현재 연도·분기(2026 Q4) 우선 추출 + 노선 역 필터"]
+        DETAIL["DataManager.get_station_detail()\n역별 현재 분기 예측 + 전년 동분기(2025 Q4) 실측 결합"]
         MAP["MapRenderer\nSVG 노선/역 렌더(호선 변경 시)\n히트맵 착색·시간대 배경·선택역 강조"]
-        MOD["ModalManager\n비차단 플로팅 카드\n예상 vs 실측 바 + 39슬롯 차트 + Q1~Q4 칩"]
+        MOD["ModalManager\n비차단 플로팅 카드\n예상 vs 전년 동분기 실측 바 + 39슬롯 차트 + 26 Q4~27 Q4 칩"]
 
         SAVE --> PJ
         PJ --> FETCH
@@ -97,8 +99,8 @@ flowchart TD
 | 파일 | 크기 | 레코드 수 | 최상위 구조 | 주요 키 | 역할 |
 | --- | --- | --- | --- | --- | --- |
 | `data/congestion.csv` | 5.00 MB | 23,316행 x 46열 | CSV (2줄 헤더) | `yr`, `day`, `lnno`, `sttn_no`, `sttn_nm`, `drc`, 39슬롯, `qu` | 백엔드 예측 파이프라인의 원천 입력 데이터 |
-| `data/congestion.json` | 24.16 MB | 23,316건 | `Array<Object>` | `yr`, `day`, `lnno`, `sttn_no`, `sttn_nm`, `drc`, `hh*_aft`, `qu` | 원천 CSV의 JSON 버전. 프론트 모달에서 **기존 최신 실측** 비교에 사용 |
-| `data/prediction.json` | 7.17 MB | 6,702건 *(체크인 기준)* | `Array<Object>` | `lnno`, `sttn_no`, `sttn_nm`, `day`, `drc`, `yr`, **`qr`**, `hh*_aft` | 대시보드 히트맵 및 모달 **예상 혼잡도** 데이터 |
+| `data/congestion.json` | 24.16 MB | 23,316건 | `Array<Object>` | `yr`, `day`, `lnno`, `sttn_no`, `sttn_nm`, `drc`, `hh*_aft`, `qu` | 원천 CSV의 JSON 버전. 프론트 모달에서 **전년도 동분기 실측(`2025 Q4`)** 비교에 사용 |
+| `data/prediction.json` | 8.9 MB | 8,268건 *(최신 `main.py` 산출)* | `Array<Object>` | `lnno`, `sttn_no`, `sttn_nm`, `day`, `drc`, `yr`, **`qr`**, `hh*_aft` | 대시보드 히트맵 및 모달 **예상 혼잡도** (`2026 Q4` 1,647 + `2027 Q1~Q4` 6,621) |
 | `data/station.json` | 77.3 KB | 784건 | `{ DESCRIPTION, DATA }` | `bldn_id`, `bldn_nm`, `route` (`"1호선"` 등), `lat`, `lot` | 역별 위경도 좌표 (SVG 지도 투영 기준) |
 | `data/route_order.json` | 2.7 KB | 8개 노선 | `Record<line, branches>` | `"1"`~`"8"` → `main`, `seongsu_branch`, `sinjeong_branch`, `banghwa_branch`, `maecheon_branch`, `hanam_branch` | 노선별 폴리라인 연결 순서 |
 | `data/Seoul_South_Korea_location_map.svg` | 262.1 KB | 1개 SVG | SVG Vector | viewBox `0 0 970 690` 투영 | 지도 배경 이미지 |
@@ -119,8 +121,9 @@ flowchart TD
   - `lnno` 공백 108행(`None`), 지선 호선 코드 `13`(2호선 성수지선), `14`(2호선 신정지선/까치산), `15`(5호선 마천지선).
   - `drc`: 2호선은 `내선`/`외선`, 타 호선은 `상선`/`하선`.
   - `day`: 2022년만 `공휴일` 포함, 나머지 연도는 `평일`/`토요일`/`일요일`.
-- **체크인 `data/prediction.json`과 `main.py` 산출물 차이**:
-  - 현재 저장소에 체크인된 `data/prediction.json`은 **6,702건**(Q1 1,671 / Q2 1,671 / Q3 1,674 / Q4 1,686)이며, 최신 `main.py`를 재실행하면 품질 필터(`minimum_years=2`)가 반영된 **6,621건**(Q1 1,662 / Q2 1,641 / Q3 1,671 / Q4 1,647)이 생성됩니다.
+- **`data/prediction.json` 최신 산출 현황 (`main.py` 기준)**:
+  - 품질 필터(`minimum_years=2`)와 추세 보정(`PredictionCalculator`)이 반영된 **8,268건**을 저장합니다: **`2026 Q4` 1,647건** + **`2027 Q1` 1,662건 / `Q2` 1,641건 / `Q3` 1,671건 / `Q4` 1,647건**.
+  - `2026 Q4` 예측 프로필 1,647건 전원이 `data/congestion.json`의 **`2025 Q4` 실측(1,671건)과 100% 매칭(누락 0건)**됩니다.
 
 ---
 
@@ -141,18 +144,18 @@ sequenceDiagram
     DC-->>Main: rows (23,316행, 헤더 2줄 제외)
     Main->>DC: parse_data(rows)
     DC-->>Main: SubwayList[SubwayData]
-    loop quarter = 1, 2, 3, 4 (target_year=2027)
-        Main->>CP: predict_congestion_data(subway_list, 2027, q)
-        CP->>CP: select_congestion_profile(data, 2027, q)
-        CP->>CP: validate_input(data, 2027, q)
-        CP->>PQA: prepare(data, 2027, q)
+    loop (yr, q) in [(2026,4), (2027,1), (2027,2), (2027,3), (2027,4)]
+        Main->>CP: predict_congestion_data(subway_list, yr, q)
+        CP->>CP: select_congestion_profile(data, yr, q)
+        CP->>CP: validate_input(data, yr, q)
+        CP->>PQA: prepare(data, yr, q)
         PQA-->>CP: (eligible_history, quality_report)
-        CP->>PC: build_prediction_data(eligible_history, 2027, q)
+        CP->>PC: build_prediction_data(eligible_history, yr, q)
         PC->>PC: _weighted_average() + _trend_adjustment()
         PC-->>CP: SubwayList[SubwayData] (예측 결과)
-        CP-->>Main: data_2027_q
+        CP-->>Main: data_yr_q
     end
-    Main->>Main: data = data_2027_1 + ... + data_2027_4 (비파괴적 __add__)
+    Main->>Main: data = data_2026_qr4 + data_2027_qr1 + ... + data_2027_qr4 (비파괴적 __add__)
     Main->>CP: save_prediction_json(data, "data/prediction.json")
     CP->>FS: JSON 덤프 (lnno, sttn_no, ..., yr, qr, 39슬롯)
 ```
@@ -213,11 +216,12 @@ sequenceDiagram
 
 | 구분 | 구성 요소 | 주요 메서드 및 역할 |
 | --- | --- | --- |
-| **공통 상수 · 유틸** | `OPERATING_TIME_SLOTS`, `parseCongestionValue`, `getCongestionMeta`, `formatTimeLabel`, `timeSlotToKey`, `getRecordQuarter`, `formatDirectionLabel` | 39개 운행 순서 시간 슬롯 정의, 결측치(`null`/`""`/`NaN`) 회색(`#64748b`) 분리 및 범례 4색(`#58d68d`, `#f4d03f`, `#f1948a`, `#ff3030`) 매핑, `qr`/`qu` 분기 키 통합, 2호선 방향(`내선`/`외선`) 변환 |
-| **데이터 추상화** | `Data` → `CongestionData`, `PredictionData`, `StationData` | `load_json()` 비동기 fetch, `normalize_station_code()`(선행 `0`·콤마 제거), `apply_filters()` 체인 필터링. `CongestionData`·`PredictionData` 모두 `select_latest_by_station()`으로 역별 최신 `(yr, qr/qu)` 1건 선택, `상선↔내선`/`하선↔외선` 방향 매핑 |
-| **데이터 매니저** | `DataManager` | `load_all()`(4개 JSON 병렬 로드), `match_station_data()`(지선 코드 `13/14/15`·진접선 `405/406/408` 변환 후 ID 우선·역명 보조 좌표 매칭), `get_filtered_data()`, `get_station_detail()`(예측 + Q1~Q4 목록 + 최신 실측 결합), `order_station_paths()`(`route_order.json` 기준 정차 경로 배열 생성) |
-| **지도 렌더러** | `MapRenderer` | `render_map()`(위경도→`970x690` SVG 투영, `<polyline>` 노선·`<circle>` 역·`<text>` 라벨 생성), `attachMapInteractions()`(휠 줌 1~5배, 드래그 팬 — 실제 이동 >3px 시에만 `setPointerCapture` 적용, 빈 영역 클릭 시 `onBackgroundClick`), `render_heat_map()`(점 색상만 갱신), `setTimeOfDay()`(새벽/낮/저녁/밤 배경 CSS 필터), `setSelectedStation()`(`.is-selected` 링 토글) |
-| **모달 매니저** | `ModalManager` | 비차단 플로팅 대화창 제어(`open_modal`, `refresh_modal`, `close_modal`). HTML 요소 바인딩 + 무인자 호출 시 자체 DOM 생성 폴백, `×` 버튼·`ESC` 키 닫기(`onClose` 동기화), `resolveStationRows()`, `render_charts()`(예상 vs 실측 비교 바 + 증감 `%p`, 39슬롯 미니 막대 차트 + 선택 시간 강조 + 클릭 시간 이동 + 피크/최소 요약, Q1~Q4 분기 칩) |
+| **공통 상수 · 유틸** | `OPERATING_TIME_SLOTS`, `DIRECTION_ALIASES`, `LINE_ROUTE_RULES`, `normalizeStationCode`, `resolveLineRoutes`, `resolveStationRoute`, `parseCongestionValue`, `getCongestionMeta`, `formatTimeLabel`, `timeSlotToKey`, `getRecordQuarter`, `getCurrentYearQuarter`, `isNewerPeriod`, `selectPreferredPredictionRecord`, `formatDirectionLabel` | 39개 운행 순서 시간 슬롯 정의, 지선(`13/14/15`)·진접선(`405/406/408`)·방향(`상선↔내선`/`하선↔외선`) 단일 매핑 테이블, `qr`/`qu` 분기 키 통합, **현재 날짜 기준 연도·분기(`2026 Q4`) 우선 선택 + 최신 폴백** |
+| **혼잡도 분류기** | `CongestionGradeClassifier` | 임계치 테이블(`DEFAULT_THRESHOLDS`: `20 / 40 / 70 / ∞`) 기반 4단계 등급·색상 + 결측(`#64748b`) 분류(`classify`, `getColor`). `MapRenderer`·`ModalManager`에 생성자 주입(OCP·DIP), `getCongestionMeta()`는 기본 인스턴스로 위임 |
+| **데이터 추상화** | `Data` → `SubwayRecordData` → `CongestionData`, `PredictionData` / `Data` → `StationData` | `Data`는 `fetcher` 주입(DI), `allowMissing` 옵션, 공통 `get_filtered_data()`(LSP) 제공(역번호 정규화 분리로 ISP 개선). `SubwayRecordData`가 공통 7종 필터·`select_latest_by_station`·`time_to_key`를 통합. `PredictionData`는 현재 분기(`2026 Q4`) 우선 선택, `CongestionData.find_baseline_record()`는 **1순위 전년 동분기(`2025 Q4`) → 2순위 과거 동분기 최신 → 3순위 없음(타 분기·`qu: null` 차단)** 수행 |
+| **데이터 매니저** | `DataManager` | `constructor(paths, dependencies)` 생성자 DI(`congestionData`/`predictionData`/`stationData`/`routeOrderData`/`fetcher` 주입 지원), `load_all()`(4개 JSON 병렬 로드), `match_station_data()`(`resolveStationRoute` 기반 ID 우선·역명 보조 좌표 매칭), `get_filtered_data()`, `get_station_detail()`(현재 분기 예측 + 다중 분기 목록 + 전년 동분기 실측 및 `actual_match_type` 결합), `order_station_paths()` |
+| **지도 렌더러** | `MapRenderer` | `classifier` 주입(DI), `render_map()`(위경도→`970x690` SVG 투영, `<polyline>` 노선·`<circle>` 역·`<text>` 라벨 생성), `attachMapInteractions()`(휠 줌 1~5배, 드래그 팬, 빈 영역 클릭 시 `onBackgroundClick`), `render_heat_map()`, `setTimeOfDay()`, `setSelectedStation()` |
+| **모달 매니저** | `ModalManager` | `classifier` 주입(DI), 비차단 플로팅 대화창 제어(`open_modal`, `refresh_modal`, `close_modal`). HTML 요소 바인딩 + 무인자 호출 시 자체 DOM 생성 폴백, `×` 버튼·`ESC` 키 닫기(`onClose` 동기화), `resolveStationRows()`, `render_charts()`(매칭 유형별 라벨 `전년 동분기 실측`/`동분기 최신 실측` + 증감 `%p`, 39슬롯 미니 막대 차트 + 선택 시간 강조 + 클릭 시간 이동 + 피크/최소 요약, 연도 구분 다중 분기 칩 `26 Q4`~`27 Q4`) |
 | **UI 컨트롤러** | `UIManager` | 대시보드 상태(`line`, `direction`, `day_type`, `time`, `quarter`, `selected_station_code`, `rendered_line`) 중앙 관리. 지도 필터와 선택 역 상태를 분리해 역 클릭 시 전체 노선 유지, 호선 변경 시에만 SVG 재생성 |
 
 ### 5.2 주요 사용자 인터랙션별 메서드 호출 플로우
@@ -243,7 +247,7 @@ sequenceDiagram
     MAP->>UI: onStationClick(station) → click_station(station)
     UI->>MAP: setSelectedStation(station_code) (선택 링 표시)
     UI->>DM: get_station_detail(station, filters)
-    DM-->>UI: { station, prediction, quarterly_predictions, actual }
+    DM-->>UI: { station, prediction (2026 Q4), quarterly_predictions, actual (2025 Q4), actual_match_type }
     UI->>MOD: open_modal(detail, filters)
 
     Note over User,MOD: 3. 외부 토글링 (방향 / 요일 / 시간 휠피커 / 차트 막대 클릭)
@@ -293,11 +297,10 @@ sequenceDiagram
 | **백엔드 (Python)** | `tests/test_prediction_quality.py` | 5 | 중복 1건 축소, 충돌 그룹 제외, 식별자 결측 보고, 전체 결측 프로필 제외, 모호한 역명 미병합 |
 | **백엔드 (Python)** | `tests/test_backtesting.py` | 2 | 타깃 연도 학습 미포함 검증, 실측 결측 `None`의 0 오처리 방지 |
 | **백엔드 (Python)** | `tests/test_json_contract.py` | 1 | `prediction.json` 출력 스키마(`lnno`, `sttn_no`, `sttn_nm`, `day`, `drc`, `yr`, `qr`, 39슬롯) 계약 |
-| **프론트엔드 (JS)** | `index/modal.test.js` | 7 *(Node 실행용)* | 무인자 초기화, 역 클릭 전체 노선 유지, 외부 토글 실시간 갱신·SVG 미재생성, 배경/닫기/ESC/드래그 가드, 호선 전환 닫힘, 결측 색상, 실제 `data/*.json` 통합 |
+| **프론트엔드 (JS)** | `index/modal.test.js` | 15 *(Node 실행용)* | 무인자 초기화, 역 클릭 전체 노선 유지, 외부 토글 실시간 갱신·SVG 미재생성, 배경/닫기/ESC/드래그 가드, 호선 전환 닫힘, 결측 색상, 다중 연도(`2026 Q4`) 우선 선택, 전년 동분기 1순위·과거 동분기 2순위 폴백·타 분기/연단위 차단, SOLID(OCP 분류기 주입·DIP `DataManager`/`fetcher` DI·LSP/ISP `Data`/`SubwayRecordData`·노선 매핑 단일화), 실제 `data/*.json` 통합 |
 
 ### 6.2 향후 개선 시 참고할 현행 데이터 계약 포인트
 
-1. **예측·실측 비교 분기 기준**: 현재 `data/prediction.json`은 `2027 Q1~Q4`를 담고 있어 기본 선택 시 **2027 Q4 예측**이 표시되며, `data/congestion.json`의 최신 실측은 **2026 Q1**입니다. 동일 계절 비교가 필요할 경우 현재 연도·분기 예측(`2026 Q4`)과 전년도 동분기 실측(`2025 Q4`) 매칭으로 전환할 수 있습니다([PLAN-QUARTER.md](file:///home/adogo/26-2/subway-congestion-info/PLAN-QUARTER.md) 참조).
-2. **`data/prediction.json` 최신화**: PR #1·#2 반영 이후 `main.py`를 재실행해 `data/prediction.json`을 재생성하면 최신 품질 필터(`minimum_years=2`) 및 추세 보정(`PredictionCalculator`) 결과가 정적 파일에 반영됩니다(6,702건 → 6,621건).
-3. **초기 네트워크 로딩 크기**: `DataManager.load_all()`이 모달의 기존 실측 비교를 위해 `data/congestion.json`(24.16 MB)을 초기 로드하므로, 추후 최적화 시 역 클릭 시점 지연 로드(lazy load) 또는 최신 연도 경량 JSON 분리로 페이로드를 크게 줄일 수 있습니다.
-4. **노선 경로(`data/route_order.json`)**: 2호선 순환선 닫힘(`0243`→`0201`), 5호선 `banghwa_branch` 중복 경로, 8호선 남위례(`2828`) 누락은 데이터 파일 원본 기준 그대로 유지되고 있습니다.
+1. **초기 네트워크 로딩 크기**: `DataManager.load_all()`이 모달의 전년도 동분기 실측 비교를 위해 `data/congestion.json`(24.16 MB)을 초기 로드하므로, 추후 최적화 시 역 클릭 시점 지연 로드(lazy load) 또는 분기 보유 연도(`2024~2026`) 경량 JSON 분리로 페이로드를 크게 줄일 수 있습니다.
+2. **노선 경로(`data/route_order.json`)**: 2호선 순환선 닫힘(`0243`→`0201`), 5호선 `banghwa_branch` 중복 경로, 8호선 남위례(`2828`) 누락은 데이터 파일 원본 기준 그대로 유지되고 있습니다.
+3. **완료된 이전 개선 항목**: `2026 Q4` 예측 데이터 반영(`data/prediction.json` 8,268건 재생성), 현재 분기 우선 표시, 전년도 동분기(`2025 Q4`) 실측 비교 매칭은 모두 반영 완료되었습니다([PLAN-QUARTER.md](file:///home/adogo/26-2/subway-congestion-info/PLAN-QUARTER.md) 참조).

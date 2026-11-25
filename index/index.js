@@ -6,6 +6,62 @@ const OPERATING_TIME_SLOTS = [
     "2330", "0000", "0030",
 ];
 
+const DIRECTION_ALIASES = Object.freeze({
+    상선: ["상선", "내선"],
+    하선: ["하선", "외선"],
+});
+
+const LINE_ROUTE_RULES = Object.freeze({
+    13: {
+        routes: ["2호선"],
+        resolveRoute: () => "2호선",
+    },
+    14: {
+        routes: ["2호선", "5호선"],
+        resolveRoute: (stationCode) => (normalizeStationCode(stationCode) === "260" ? "5호선" : "2호선"),
+    },
+    15: {
+        routes: ["5호선"],
+        resolveRoute: () => "5호선",
+    },
+    4: {
+        routes: ["4호선", "진접선"],
+        resolveRoute: (stationCode) => (
+            ["405", "406", "408"].includes(normalizeStationCode(stationCode)) ? "진접선" : "4호선"
+        ),
+    },
+});
+
+function normalizeStationCode(code) {
+    const normalized = String(code ?? "")
+        .replaceAll(",", "")
+        .replace(/^0+/, "");
+    return normalized || "0";
+}
+
+function getEquivalentDirections(direction) {
+    return DIRECTION_ALIASES[direction] || [direction];
+}
+
+function resolveLineRoutes(line) {
+    const lineKey = String(line);
+    if (LINE_ROUTE_RULES[lineKey]) {
+        return [...LINE_ROUTE_RULES[lineKey].routes];
+    }
+    if (typeof line === "number" || /^\d+$/.test(lineKey)) {
+        return [`${lineKey}호선`];
+    }
+    return [lineKey];
+}
+
+function resolveStationRoute(line, stationCode) {
+    const lineKey = String(line);
+    if (LINE_ROUTE_RULES[lineKey]) {
+        return LINE_ROUTE_RULES[lineKey].resolveRoute(stationCode);
+    }
+    return `${lineKey}호선`;
+}
+
 function parseCongestionValue(value) {
     if (value === null || value === undefined || value === "") {
         return null;
@@ -14,21 +70,52 @@ function parseCongestionValue(value) {
     return Number.isFinite(numeric) ? numeric : null;
 }
 
+class CongestionGradeClassifier {
+    static DEFAULT_THRESHOLDS = Object.freeze([
+        { max: 20, level: "low", label: "원활", color: "#58d68d" },
+        { max: 40, level: "moderate", label: "보통", color: "#f4d03f" },
+        { max: 70, level: "high", label: "혼잡", color: "#f1948a" },
+        { max: Infinity, level: "very-high", label: "매우 혼잡", color: "#ff3030" },
+    ]);
+
+    static MISSING_META = Object.freeze({
+        level: "missing",
+        label: "데이터 없음",
+        color: "#64748b",
+        value: null,
+    });
+
+    constructor(thresholds = CongestionGradeClassifier.DEFAULT_THRESHOLDS) {
+        if (!Array.isArray(thresholds) || thresholds.length === 0) {
+            throw new TypeError("thresholds must be a non-empty array");
+        }
+        this.thresholds = thresholds;
+    }
+
+    classify(value) {
+        const numeric = parseCongestionValue(value);
+        if (numeric === null) {
+            return { ...CongestionGradeClassifier.MISSING_META };
+        }
+        const matched = this.thresholds.find((rule) => numeric < rule.max)
+            || this.thresholds[this.thresholds.length - 1];
+        return {
+            level: matched.level,
+            label: matched.label,
+            color: matched.color,
+            value: numeric,
+        };
+    }
+
+    getColor(value) {
+        return this.classify(value).color;
+    }
+}
+
+const DEFAULT_CONGESTION_CLASSIFIER = new CongestionGradeClassifier();
+
 function getCongestionMeta(value) {
-    const numeric = parseCongestionValue(value);
-    if (numeric === null) {
-        return { level: "missing", label: "데이터 없음", color: "#64748b", value: null };
-    }
-    if (numeric >= 70) {
-        return { level: "very-high", label: "매우 혼잡", color: "#ff3030", value: numeric };
-    }
-    if (numeric >= 40) {
-        return { level: "high", label: "혼잡", color: "#f1948a", value: numeric };
-    }
-    if (numeric >= 20) {
-        return { level: "moderate", label: "보통", color: "#f4d03f", value: numeric };
-    }
-    return { level: "low", label: "원활", color: "#58d68d", value: numeric };
+    return DEFAULT_CONGESTION_CLASSIFIER.classify(value);
 }
 
 function formatTimeLabel(time) {
@@ -125,14 +212,20 @@ function formatDirectionLabel(line, direction, recordDirection) {
 }
 
 class Data {
-    constructor(path = "") {
+    constructor(path = "", { fetcher = null, allowMissing = false } = {}) {
         this.path = path;
-
         this.data = {};
+        this.fetcher = fetcher;
+        this.allowMissing = Boolean(allowMissing);
     }
 
-    async json_to_object(path, { allowMissing = false } = {}) {
-        const response = await fetch(path);
+    async json_to_object(path, options = {}) {
+        const allowMissing = options.allowMissing ?? this.allowMissing;
+        const fetcher = options.fetcher ?? this.fetcher ?? (typeof fetch === "function" ? fetch : null);
+        if (typeof fetcher !== "function") {
+            throw new Error(`JSON을 불러올 fetcher가 설정되지 않았습니다: ${path}`);
+        }
+        const response = await fetcher(path);
         if (allowMissing && response.status === 404) {
             return null;
         }
@@ -140,20 +233,20 @@ class Data {
             throw new Error(`JSON 파일을 불러오지 못했습니다: ${path}`);
         }
         return response.json();
-   }
+    }
 
     // 객체에 저장된 경로와 json_to_object 메서드로 파싱 수행 및 data 객체로 각각 저장
     async load_json(options = {}) {
-        const response = await this.json_to_object(this.path, options);
+        const response = await this.json_to_object(this.path, {
+            allowMissing: this.allowMissing,
+            ...options,
+        });
         this.data = response ?? [];
         return this;
     }
 
-    normalize_station_code(code) {
-        const normalized = String(code ?? "")
-            .replaceAll(",", "")
-            .replace(/^0+/, "");
-        return normalized || "0";
+    get_filtered_data(_filters = {}) {
+        return this.data;
     }
 
     filter_items(items, key, value) {
@@ -194,11 +287,9 @@ class Data {
     }
 }
 
-
-class CongestionData extends Data {
-
-    constructor(path ="") {
-        super(path || "../data/congestion.json");
+class SubwayRecordData extends Data {
+    normalize_station_code(code) {
+        return normalizeStationCode(code);
     }
 
     get_matching_records(filters = {}) {
@@ -232,11 +323,7 @@ class CongestionData extends Data {
     }
 
     filter_by_direction(items, direction) {
-        const directions = direction === "상선"
-            ? ["상선", "내선"]
-            : direction === "하선"
-                ? ["하선", "외선"]
-                : [direction];
+        const directions = getEquivalentDirections(direction);
         return this.filter_items(
             items,
             "drc",
@@ -266,6 +353,33 @@ class CongestionData extends Data {
                 return itemQuarter !== null && String(itemQuarter) === String(quarter);
             },
         );
+    }
+
+    select_latest_by_station(items) {
+        const latestByStation = new Map();
+        for (const item of this.filter_items(items, "sttn_no", () => true)) {
+            const stationCode = this.normalize_station_code(item.sttn_no);
+            const previous = latestByStation.get(stationCode);
+            if (!previous || this.is_newer(item, previous)) {
+                latestByStation.set(stationCode, item);
+            }
+        }
+        return [...latestByStation.values()];
+    }
+
+    is_newer(candidate, previous) {
+        return isNewerPeriod(candidate, previous);
+    }
+
+    time_to_key(time) {
+        return timeSlotToKey(time);
+    }
+}
+
+class CongestionData extends SubwayRecordData {
+
+    constructor(path = "", options = {}) {
+        super(path || "../data/congestion.json", options);
     }
 
     find_baseline_record(filters = {}, targetYear, targetQuarter) {
@@ -334,58 +448,12 @@ class CongestionData extends Data {
         // 3순위: 동일 분기 실측 없음 (타 분기 또는 연단위 구형 데이터 혼입 금지)
         return { record: null, matchType: "none" };
     }
-
-    select_latest_by_station(items) {
-        const latestByStation = new Map();
-        for (const item of this.filter_items(items, "sttn_no", () => true)) {
-            const stationCode = this.normalize_station_code(item.sttn_no);
-            const previous = latestByStation.get(stationCode);
-            if (!previous || this.is_newer(item, previous)) {
-                latestByStation.set(stationCode, item);
-            }
-        }
-        return [...latestByStation.values()];
-    }
-
-    is_newer(candidate, previous) {
-        return isNewerPeriod(candidate, previous);
-    }
-
-    time_to_key(time) {
-        const normalizedTime = String(time).padStart(4, "0");
-        const match = normalizedTime.match(/^([01]\d|2[0-3])(00|30)$/);
-
-        if (!match) {
-            throw new Error(`시간은 00분 또는 30분 단위의 HHMM 형식이어야 합니다: ${time}`);
-        }
-
-        const [, hour, minute] = match;
-        return minute === "30" ? `hh${hour}_mm30_aft` : `hh${hour}_aft`;
-    }
-
 }
 
-class PredictionData extends Data {
+class PredictionData extends SubwayRecordData {
 
-    constructor(path ="") {
-        super(path || "../data/prediction.json");
-    }
-
-    async load_json() {
-        return super.load_json({ allowMissing: true });
-    }
-
-    get_matching_records(filters = {}) {
-        const filterMethods = [
-            ["day_type", "filter_by_day_type"],
-            ["line", "filter_by_line"],
-            ["direction", "filter_by_direction"],
-            ["station_code", "filter_by_station_code"],
-            ["station_name", "filter_by_station_name"],
-            ["year", "filter_by_year"],
-            ["quarter", "filter_by_quarter"],
-        ];
-        return this.apply_filters(this.data, filters, filterMethods);
+    constructor(path = "", options = {}) {
+        super(path || "../data/prediction.json", { allowMissing: true, ...options });
     }
 
     get_filtered_data(filters = {}) {
@@ -395,52 +463,6 @@ class PredictionData extends Data {
             quarter: filters.quarter,
             referenceDate: filters.referenceDate,
         });
-    }
-
-    filter_by_day_type(items, dayType) {
-        return this.filter_items(items, "day", dayType);
-    }
-
-    filter_by_line(items, line) {
-        return this.filter_items(items, "lnno", line);
-    }
-
-    filter_by_direction(items, direction) {
-        const directions = direction === "상선"
-            ? ["상선", "내선"]
-            : direction === "하선"
-                ? ["하선", "외선"]
-                : [direction];
-        return this.filter_items(
-            items,
-            "drc",
-            (item) => directions.includes(item.drc),
-        );
-    }
-
-    filter_by_station_code(items, stationCode) {
-        const normalizedCode = this.normalize_station_code(stationCode);
-        return this.filter_items(
-            items,
-            "sttn_no",
-            (item) => this.normalize_station_code(item.sttn_no) === normalizedCode,
-        );
-    }
-
-    filter_by_station_name(items, stationName) {
-        return this.filter_items(items, "sttn_nm", stationName);
-    }
-
-    filter_by_year(items, year) {
-        return this.filter_items(items, "yr", year);
-    }
-
-    filter_by_quarter(items, quarter) {
-        return this.filter_items(
-            items,
-            "qr",
-            (item) => String(getRecordQuarter(item)) === String(quarter),
-        );
     }
 
     select_preferred_by_station(items, options = {}) {
@@ -462,39 +484,16 @@ class PredictionData extends Data {
         }
         return selected;
     }
-
-    select_latest_by_station(items) {
-        const latestByStation = new Map();
-        for (const item of this.filter_items(items, "sttn_no", () => true)) {
-            const stationCode = this.normalize_station_code(item.sttn_no);
-            const previous = latestByStation.get(stationCode);
-            if (!previous || this.is_newer(item, previous)) {
-                latestByStation.set(stationCode, item);
-            }
-        }
-        return [...latestByStation.values()];
-    }
-
-    is_newer(candidate, previous) {
-        const candidateYear = Number(candidate.yr) || 0;
-        const previousYear = Number(previous.yr) || 0;
-        const candidateQuarter = Number(getRecordQuarter(candidate)) || 0;
-        const previousQuarter = Number(getRecordQuarter(previous)) || 0;
-        return candidateYear > previousYear
-            || (candidateYear === previousYear && candidateQuarter >= previousQuarter);
-    }
-
-    time_to_key(time) {
-        return timeSlotToKey(time);
-    }
 }
-
 
 class StationData extends Data {
 
-    constructor(path ="") {
-        super(path || "../data/station.json");
+    constructor(path = "", options = {}) {
+        super(path || "../data/station.json", options);
+    }
 
+    normalize_station_code(code) {
+        return normalizeStationCode(code);
     }
 
     filter_by_station_name(items, station_name){
@@ -528,20 +527,7 @@ class StationData extends Data {
     }
 
     line_to_routes(line) {
-        const lineNumber = String(line);
-        if (lineNumber === "13") {
-            return ["2호선"];
-        }
-        if (lineNumber === "14") {
-            return ["2호선", "5호선"];
-        }
-        if (lineNumber === "15") {
-            return ["5호선"];
-        }
-        if (lineNumber === "4") {
-            return ["4호선", "진접선"];
-        }
-        return [this.line_to_route(line)];
+        return resolveLineRoutes(line);
     }
 
     get_filtered_data(filters = {}) {
@@ -559,19 +545,20 @@ class StationData extends Data {
 
 
 class DataManager {
-    // 생성자로 각 데이터 파일의 경로 설정
-    constructor(paths = {}) {
+    // 생성자로 각 데이터 파일의 경로 설정 및 데이터 소스 의존성 주입(DI) 지원
+    constructor(paths = {}, dependencies = {}) {
         this.paths = {
             congestion: paths.congestion || "../data/congestion.json",
             prediction: paths.prediction || "../data/prediction.json",
             station: paths.station || "../data/station.json",
             routeOrder: paths.routeOrder || "../data/route_order.json",
         };
+        const sourceOptions = dependencies.fetcher ? { fetcher: dependencies.fetcher } : {};
 
-        this.congestion_data = new CongestionData(this.paths.congestion);
-        this.prediction_data = new PredictionData(this.paths.prediction);
-        this.station_data = new StationData(this.paths.station);
-        this.route_order_data = new Data(this.paths.routeOrder);
+        this.congestion_data = dependencies.congestionData || new CongestionData(this.paths.congestion, sourceOptions);
+        this.prediction_data = dependencies.predictionData || new PredictionData(this.paths.prediction, sourceOptions);
+        this.station_data = dependencies.stationData || new StationData(this.paths.station, sourceOptions);
+        this.route_order_data = dependencies.routeOrderData || new Data(this.paths.routeOrder, sourceOptions);
         this.matched_station_data = [];
     }
 
@@ -591,8 +578,7 @@ class DataManager {
     }
 
     normalize_station_code(code) {
-        const normalized = String(code ?? "").replaceAll(",", "").replace(/^0+/, "");
-        return normalized || "0";
+        return normalizeStationCode(code);
     }
 
     normalize_station_name(name) {
@@ -604,22 +590,7 @@ class DataManager {
     }
 
     congestion_route_to_station_route(line, stationCode) {
-        const lineNumber = String(line);
-        const code = this.normalize_station_code(stationCode);
-
-        if (lineNumber === "13") {
-            return "2호선";
-        }
-        if (lineNumber === "14") {
-            return code === "260" ? "5호선" : "2호선";
-        }
-        if (lineNumber === "15") {
-            return "5호선";
-        }
-        if (lineNumber === "4" && ["405", "406", "408"].includes(code)) {
-            return "진접선";
-        }
-        return `${lineNumber}호선`;
+        return resolveStationRoute(line, stationCode);
     }
 
     to_array(items) {
@@ -854,11 +825,12 @@ class DataManager {
 }
 
 class MapRenderer {
-    constructor({ container, dataManager, onStationClick, onBackgroundClick } = {}) {
+    constructor({ container, dataManager, onStationClick, onBackgroundClick, classifier } = {}) {
         this.container = this.findElement(container);
         this.dataManager = dataManager;
         this.onStationClick = onStationClick;
         this.onBackgroundClick = onBackgroundClick;
+        this.classifier = classifier || DEFAULT_CONGESTION_CLASSIFIER;
         this.showHeatMap = true;
         this.selectedStationCode = "";
         this.zoom = 1;
@@ -1245,7 +1217,7 @@ class MapRenderer {
 
     // 혼잡도 별로 색상을 설정
     getCongestionColor(value) {
-        return getCongestionMeta(value).color;
+        return this.classifier.getColor(value);
     }
 }
 
@@ -1260,6 +1232,7 @@ class ModalManager {
         metaInfo,
         onClose,
         onSelectTime,
+        classifier,
     } = {}) {
         this.modal = this.findElement(modal) || this.createModal();
         this.title = this.findElement(title, this.modal)
@@ -1284,6 +1257,7 @@ class ModalManager {
             || null;
         this.onClose = onClose || null;
         this.onSelectTime = onSelectTime || null;
+        this.classifier = classifier || DEFAULT_CONGESTION_CLASSIFIER;
         this.is_open = false;
         this.station_code = "";
         this.current_station = null;
@@ -1420,7 +1394,7 @@ class ModalManager {
         const selectedTime = String(filters.time || "0600").replace(":", "").padStart(4, "0");
         const timeKey = timeSlotToKey(selectedTime);
         const { prediction, quarterlyPredictions, actual, actual_match_type } = this.resolveStationRows(station, filters);
-        const predictedMeta = getCongestionMeta(prediction ? prediction[timeKey] : null);
+        const predictedMeta = this.classifier.classify(prediction ? prediction[timeKey] : null);
 
         if (this.lineBadge) {
             this.lineBadge.textContent = String(filters.line ?? prediction?.lnno ?? "");
@@ -1491,8 +1465,8 @@ class ModalManager {
         const timeKey = timeSlotToKey(selectedTime);
         const { prediction, quarterlyPredictions, actual, actual_match_type } = this.resolveStationRows(station, filters);
 
-        const predictedMeta = getCongestionMeta(prediction ? prediction[timeKey] : null);
-        const actualMeta = getCongestionMeta(actual ? actual[timeKey] : null);
+        const predictedMeta = this.classifier.classify(prediction ? prediction[timeKey] : null);
+        const actualMeta = this.classifier.classify(actual ? actual[timeKey] : null);
 
         const predQuarter = getRecordQuarter(prediction);
         const actualQuarter = getRecordQuarter(actual);
@@ -1601,7 +1575,7 @@ class ModalManager {
             return {
                 slot,
                 label: formatTimeLabel(slot),
-                meta: getCongestionMeta(rawValue),
+                meta: this.classifier.classify(rawValue),
             };
         });
 
@@ -1680,7 +1654,7 @@ class ModalManager {
 
             quarterlyPredictions.forEach((row) => {
                 const quarter = getRecordQuarter(row);
-                const qMeta = getCongestionMeta(row[timeKey]);
+                const qMeta = this.classifier.classify(row[timeKey]);
                 const chip = document.createElement("div");
                 chip.className = "quarter-chip";
                 const matchesYear = activeYear === null || String(row.yr) === String(activeYear);
@@ -1735,9 +1709,7 @@ class ModalManager {
             return false;
         }
         const directionMatches = filters.direction === undefined
-            || filters.direction === row.drc
-            || (filters.direction === "상선" && row.drc === "내선")
-            || (filters.direction === "하선" && row.drc === "외선");
+            || getEquivalentDirections(filters.direction).includes(row.drc);
         const rowQuarter = getRecordQuarter(row);
         return (filters.year === undefined || String(row.yr) === String(filters.year))
             && (filters.day_type === undefined || row.day === filters.day_type)
@@ -1891,7 +1863,9 @@ class UIManager {
 }
 
 const SubwayDashboard = {
+    CongestionGradeClassifier,
     Data,
+    SubwayRecordData,
     CongestionData,
     PredictionData,
     StationData,
@@ -1900,6 +1874,11 @@ const SubwayDashboard = {
     ModalManager,
     UIManager,
     OPERATING_TIME_SLOTS,
+    DIRECTION_ALIASES,
+    LINE_ROUTE_RULES,
+    normalizeStationCode,
+    resolveLineRoutes,
+    resolveStationRoute,
     getCongestionMeta,
     formatTimeLabel,
     getCurrentYearQuarter,
