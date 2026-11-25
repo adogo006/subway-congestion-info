@@ -54,6 +54,65 @@ function getRecordQuarter(record) {
     return quarter === undefined || quarter === null || quarter === "" ? null : quarter;
 }
 
+function getCurrentYearQuarter(referenceDate = new Date()) {
+    const date = referenceDate instanceof Date && !Number.isNaN(referenceDate.getTime())
+        ? referenceDate
+        : new Date();
+    return {
+        year: date.getFullYear(),
+        quarter: Math.floor(date.getMonth() / 3) + 1,
+    };
+}
+
+function isNewerPeriod(candidate, previous) {
+    const candidateYear = Number(candidate?.yr) || 0;
+    const previousYear = Number(previous?.yr) || 0;
+    const candidateQuarter = Number(getRecordQuarter(candidate)) || 0;
+    const previousQuarter = Number(getRecordQuarter(previous)) || 0;
+    return candidateYear > previousYear
+        || (candidateYear === previousYear && candidateQuarter >= previousQuarter);
+}
+
+function selectPreferredPredictionRecord(records, { year, quarter, referenceDate } = {}) {
+    if (!Array.isArray(records) || records.length === 0) {
+        return null;
+    }
+
+    const hasYearFilter = year !== undefined && year !== null && year !== "";
+    const hasQuarterFilter = quarter !== undefined && quarter !== null && quarter !== "";
+
+    const candidates = records.filter((item) => {
+        if (!item || typeof item !== "object") {
+            return false;
+        }
+        if (hasYearFilter && String(item.yr) !== String(year)) {
+            return false;
+        }
+        if (hasQuarterFilter && String(getRecordQuarter(item)) !== String(quarter)) {
+            return false;
+        }
+        return true;
+    });
+
+    if (candidates.length === 0) {
+        return null;
+    }
+
+    const current = getCurrentYearQuarter(referenceDate);
+    const currentMatch = candidates.find(
+        (item) => Number(item.yr) === current.year
+            && Number(getRecordQuarter(item)) === current.quarter,
+    );
+    if (currentMatch) {
+        return currentMatch;
+    }
+
+    return candidates.reduce(
+        (latest, item) => (!latest || isNewerPeriod(item, latest) ? item : latest),
+        null,
+    );
+}
+
 function formatDirectionLabel(line, direction, recordDirection) {
     if (recordDirection) {
         return recordDirection;
@@ -142,7 +201,7 @@ class CongestionData extends Data {
         super(path || "../data/congestion.json");
     }
 
-    get_filtered_data(filters = {}) {
+    get_matching_records(filters = {}) {
         const filterMethods = [
             ["year", "filter_by_year"],
             ["day_type", "filter_by_day_type"],
@@ -152,7 +211,11 @@ class CongestionData extends Data {
             ["station_name", "filter_by_station_name"],
             ["quarter", "filter_by_quarter"],
         ];
-        const filtered = this.apply_filters(this.data, filters, filterMethods);
+        return this.apply_filters(this.data, filters, filterMethods);
+    }
+
+    get_filtered_data(filters = {}) {
+        const filtered = this.get_matching_records(filters);
         return this.select_latest_by_station(filtered);
     }
 
@@ -195,7 +258,81 @@ class CongestionData extends Data {
     }
 
     filter_by_quarter(items, quarter) {
-        return this.filter_items(items, "qu", quarter);
+        return this.filter_items(
+            items,
+            "qu",
+            (item) => {
+                const itemQuarter = getRecordQuarter(item);
+                return itemQuarter !== null && String(itemQuarter) === String(quarter);
+            },
+        );
+    }
+
+    find_baseline_record(filters = {}, targetYear, targetQuarter) {
+        const numericYear = Number(targetYear);
+        const numericQuarter = Number(targetQuarter);
+        if (!Number.isFinite(numericYear) || !Number.isFinite(numericQuarter) || numericQuarter < 1 || numericQuarter > 4) {
+            return { record: null, matchType: "none" };
+        }
+
+        const baseFilters = {
+            day_type: filters.day_type,
+            direction: filters.direction,
+            quarter: numericQuarter,
+        };
+        const hasLine = filters.line !== undefined && filters.line !== null && filters.line !== "";
+        const hasCode = filters.station_code !== undefined
+            && filters.station_code !== null
+            && filters.station_code !== "";
+        const hasName = Boolean(filters.station_name);
+
+        const candidateFilterSets = [];
+        if (hasCode) {
+            if (hasLine) {
+                candidateFilterSets.push({ ...baseFilters, line: filters.line, station_code: filters.station_code });
+            }
+            candidateFilterSets.push({ ...baseFilters, station_code: filters.station_code });
+        }
+        if (hasName) {
+            candidateFilterSets.push({
+                ...baseFilters,
+                ...(hasLine ? { line: filters.line } : {}),
+                station_name: filters.station_name,
+            });
+        }
+        if (candidateFilterSets.length === 0) {
+            candidateFilterSets.push({ ...baseFilters, ...(hasLine ? { line: filters.line } : {}) });
+        }
+
+        // 1순위: 전년도 동일 분기 (yr === targetYear - 1, qu === targetQuarter)
+        const previousYear = numericYear - 1;
+        for (const filterSet of candidateFilterSets) {
+            const exactMatches = this.get_matching_records({
+                ...filterSet,
+                year: previousYear,
+            });
+            if (exactMatches.length > 0) {
+                return { record: exactMatches[0], matchType: "prev_year_same_quarter" };
+            }
+        }
+
+        // 2순위 (폴백): 동일 분기 중 예측 연도 이전의 가장 최신 실측 (yr < targetYear, qu === targetQuarter)
+        for (const filterSet of candidateFilterSets) {
+            const sameQuarterMatches = this.get_matching_records(filterSet).filter((item) => {
+                const itemYear = Number(item.yr);
+                return Number.isFinite(itemYear) && itemYear < numericYear;
+            });
+            if (sameQuarterMatches.length > 0) {
+                const latestSameQuarter = sameQuarterMatches.reduce(
+                    (latest, item) => (!latest || this.is_newer(item, latest) ? item : latest),
+                    null,
+                );
+                return { record: latestSameQuarter, matchType: "latest_same_quarter" };
+            }
+        }
+
+        // 3순위: 동일 분기 실측 없음 (타 분기 또는 연단위 구형 데이터 혼입 금지)
+        return { record: null, matchType: "none" };
     }
 
     select_latest_by_station(items) {
@@ -211,12 +348,7 @@ class CongestionData extends Data {
     }
 
     is_newer(candidate, previous) {
-        const candidateYear = Number(candidate.yr) || 0;
-        const previousYear = Number(previous.yr) || 0;
-        const candidateQuarter = Number(candidate.qu) || 0;
-        const previousQuarter = Number(previous.qu) || 0;
-        return candidateYear > previousYear
-            || (candidateYear === previousYear && candidateQuarter >= previousQuarter);
+        return isNewerPeriod(candidate, previous);
     }
 
     time_to_key(time) {
@@ -258,7 +390,11 @@ class PredictionData extends Data {
 
     get_filtered_data(filters = {}) {
         const filtered = this.get_matching_records(filters);
-        return this.select_latest_by_station(filtered);
+        return this.select_preferred_by_station(filtered, {
+            year: filters.year,
+            quarter: filters.quarter,
+            referenceDate: filters.referenceDate,
+        });
     }
 
     filter_by_day_type(items, dayType) {
@@ -305,6 +441,26 @@ class PredictionData extends Data {
             "qr",
             (item) => String(getRecordQuarter(item)) === String(quarter),
         );
+    }
+
+    select_preferred_by_station(items, options = {}) {
+        const recordsByStation = new Map();
+        for (const item of this.filter_items(items, "sttn_no", () => true)) {
+            const stationCode = this.normalize_station_code(item.sttn_no);
+            if (!recordsByStation.has(stationCode)) {
+                recordsByStation.set(stationCode, []);
+            }
+            recordsByStation.get(stationCode).push(item);
+        }
+
+        const selected = [];
+        for (const stationRecords of recordsByStation.values()) {
+            const preferred = selectPreferredPredictionRecord(stationRecords, options);
+            if (preferred) {
+                selected.push(preferred);
+            }
+        }
+        return selected;
     }
 
     select_latest_by_station(items) {
@@ -599,36 +755,54 @@ class DataManager {
             return (Number(getRecordQuarter(a)) || 0) - (Number(getRecordQuarter(b)) || 0);
         });
 
-        let prediction = null;
-        if (filters.quarter !== undefined && filters.quarter !== null && filters.quarter !== "") {
-            prediction = quarterlyPredictions.find(
-                (item) => String(getRecordQuarter(item)) === String(filters.quarter),
-            ) || null;
-        } else if (quarterlyPredictions.length > 0) {
-            prediction = quarterlyPredictions[quarterlyPredictions.length - 1];
-        }
+        const prediction = selectPreferredPredictionRecord(quarterlyPredictions, {
+            year: filters.year,
+            quarter: filters.quarter,
+            referenceDate: filters.referenceDate,
+        });
 
         const actualFilters = {
             day_type: filters.day_type,
             direction: filters.direction,
         };
+        const predYear = prediction ? Number(prediction.yr) : NaN;
+        const predQuarter = prediction ? Number(getRecordQuarter(prediction)) : NaN;
+
         let actual = null;
-        if (rawCode !== undefined && rawCode !== null && rawCode !== "") {
-            actual = this.congestion_data.get_filtered_data({
-                ...actualFilters,
-                line: filters.line,
-                station_code: rawCode,
-            })[0] || this.congestion_data.get_filtered_data({
-                ...actualFilters,
-                station_code: rawCode,
-            })[0] || null;
-        }
-        if (!actual && station.station_name) {
-            actual = this.congestion_data.get_filtered_data({
-                ...actualFilters,
-                line: filters.line,
-                station_name: station.station_name,
-            })[0] || null;
+        let actualMatchType = "none";
+
+        if (Number.isFinite(predYear) && Number.isFinite(predQuarter) && predQuarter >= 1 && predQuarter <= 4) {
+            const baseline = this.congestion_data.find_baseline_record(
+                {
+                    ...actualFilters,
+                    line: filters.line,
+                    station_code: rawCode,
+                    station_name: station.station_name,
+                },
+                predYear,
+                predQuarter,
+            );
+            actual = baseline.record;
+            actualMatchType = baseline.matchType;
+        } else {
+            if (rawCode !== undefined && rawCode !== null && rawCode !== "") {
+                actual = this.congestion_data.get_filtered_data({
+                    ...actualFilters,
+                    line: filters.line,
+                    station_code: rawCode,
+                })[0] || this.congestion_data.get_filtered_data({
+                    ...actualFilters,
+                    station_code: rawCode,
+                })[0] || null;
+            }
+            if (!actual && station.station_name) {
+                actual = this.congestion_data.get_filtered_data({
+                    ...actualFilters,
+                    line: filters.line,
+                    station_name: station.station_name,
+                })[0] || null;
+            }
+            actualMatchType = actual ? "latest_any" : "none";
         }
 
         return {
@@ -638,6 +812,7 @@ class DataManager {
             prediction,
             quarterly_predictions: quarterlyPredictions,
             actual,
+            actual_match_type: actualMatchType,
         };
     }
 
@@ -1214,13 +1389,11 @@ class ModalManager {
 
         let prediction = station.prediction || null;
         if (!prediction && quarterlyPredictions.length > 0) {
-            if (filters.quarter !== undefined && filters.quarter !== null && filters.quarter !== "") {
-                prediction = quarterlyPredictions.find(
-                    (row) => String(getRecordQuarter(row)) === String(filters.quarter),
-                ) || null;
-            } else {
-                prediction = quarterlyPredictions[quarterlyPredictions.length - 1];
-            }
+            prediction = selectPreferredPredictionRecord(quarterlyPredictions, {
+                year: filters.year,
+                quarter: filters.quarter,
+                referenceDate: filters.referenceDate,
+            });
         }
         if (!prediction && Array.isArray(station.congestion_data) && station.congestion_data.length > 0) {
             prediction = station.congestion_data.find((row) => this.matches_filters(row, filters))
@@ -1231,6 +1404,7 @@ class ModalManager {
             prediction,
             quarterlyPredictions,
             actual: station.actual || null,
+            actual_match_type: station.actual_match_type || null,
         };
     }
 
@@ -1245,7 +1419,7 @@ class ModalManager {
 
         const selectedTime = String(filters.time || "0600").replace(":", "").padStart(4, "0");
         const timeKey = timeSlotToKey(selectedTime);
-        const { prediction, quarterlyPredictions, actual } = this.resolveStationRows(station, filters);
+        const { prediction, quarterlyPredictions, actual, actual_match_type } = this.resolveStationRows(station, filters);
         const predictedMeta = getCongestionMeta(prediction ? prediction[timeKey] : null);
 
         if (this.lineBadge) {
@@ -1286,7 +1460,7 @@ class ModalManager {
         if (this.content) {
             this.content.textContent = "";
             this.render_charts(
-                { ...station, prediction, quarterly_predictions: quarterlyPredictions, actual },
+                { ...station, prediction, quarterly_predictions: quarterlyPredictions, actual, actual_match_type },
                 { ...filters, time: selectedTime },
             );
         }
@@ -1315,12 +1489,50 @@ class ModalManager {
         if (!this.content) return;
         const selectedTime = String(filters.time || "0600").replace(":", "").padStart(4, "0");
         const timeKey = timeSlotToKey(selectedTime);
-        const { prediction, quarterlyPredictions, actual } = this.resolveStationRows(station, filters);
+        const { prediction, quarterlyPredictions, actual, actual_match_type } = this.resolveStationRows(station, filters);
 
         const predictedMeta = getCongestionMeta(prediction ? prediction[timeKey] : null);
         const actualMeta = getCongestionMeta(actual ? actual[timeKey] : null);
 
-        // 1. 현재 시간대 예상 vs 최신 실측 비교 영역
+        const predQuarter = getRecordQuarter(prediction);
+        const actualQuarter = getRecordQuarter(actual);
+
+        let matchType = actual_match_type;
+        if (!matchType) {
+            if (!actual) {
+                matchType = "none";
+            } else if (
+                prediction?.yr
+                && predQuarter !== null
+                && actualQuarter !== null
+                && String(actualQuarter) === String(predQuarter)
+            ) {
+                if (Number(actual.yr) === Number(prediction.yr) - 1) {
+                    matchType = "prev_year_same_quarter";
+                } else if (Number(actual.yr) < Number(prediction.yr)) {
+                    matchType = "latest_same_quarter";
+                } else {
+                    matchType = "latest_any";
+                }
+            } else {
+                matchType = "latest_any";
+            }
+        }
+
+        const deltaBasisLabel = matchType === "prev_year_same_quarter"
+            ? "전년 동분기 대비"
+            : matchType === "latest_same_quarter"
+                ? "동분기 실측 대비"
+                : "실측 대비";
+        const actualPrefix = matchType === "prev_year_same_quarter"
+            ? "전년 동분기 실측"
+            : matchType === "latest_same_quarter"
+                ? "동분기 최신 실측"
+                : matchType === "none"
+                    ? "전년 동분기 실측"
+                    : "기존 실측";
+
+        // 1. 현재 시간대 예상 vs 전년도 동분기 실측 비교 영역
         const comparisonSection = document.createElement("div");
         comparisonSection.className = "modal-comparison";
 
@@ -1339,12 +1551,12 @@ class ModalManager {
             const diff = Number((predictedMeta.value - actualMeta.value).toFixed(1));
             if (diff > 0) {
                 deltaEl.classList.add("is-up");
-                deltaEl.textContent = `▲ +${diff.toFixed(1)}%p (실측 대비)`;
+                deltaEl.textContent = `▲ +${diff.toFixed(1)}%p (${deltaBasisLabel})`;
             } else if (diff < 0) {
                 deltaEl.classList.add("is-down");
-                deltaEl.textContent = `▼ ${diff.toFixed(1)}%p (실측 대비)`;
+                deltaEl.textContent = `▼ ${diff.toFixed(1)}%p (${deltaBasisLabel})`;
             } else {
-                deltaEl.textContent = "변동 없음 (실측 대비)";
+                deltaEl.textContent = `변동 없음 (${deltaBasisLabel})`;
             }
         } else {
             deltaEl.textContent = actualMeta.value === null ? "실측 비교 없음" : "";
@@ -1360,14 +1572,12 @@ class ModalManager {
         const compareList = document.createElement("div");
         compareList.className = "modal-compare-list";
 
-        const predQuarter = getRecordQuarter(prediction);
         const predLabel = prediction?.yr
             ? `예상 혼잡도 (${prediction.yr}${predQuarter ? ` Q${predQuarter}` : ""})`
             : "예상 혼잡도";
-        const actualQuarter = getRecordQuarter(actual);
         const actualLabel = actual?.yr
-            ? `기존 실측 (${actual.yr}${actualQuarter ? ` Q${actualQuarter}` : ""})`
-            : "기존 실측";
+            ? `${actualPrefix} (${actual.yr}${actualQuarter ? ` Q${actualQuarter}` : ""})`
+            : actualPrefix;
 
         compareList.append(
             this._createCompareBar(predLabel, predictedMeta, scaleMax, "predicted-bar"),
@@ -1459,18 +1669,31 @@ class ModalManager {
         if (quarterlyPredictions.length > 0) {
             const quartersSection = document.createElement("div");
             quartersSection.className = "modal-quarters";
+            const activeYear = prediction?.yr ?? null;
             const activeQuarter = getRecordQuarter(prediction);
+            const distinctYears = new Set(
+                quarterlyPredictions
+                    .map((row) => row.yr)
+                    .filter((yr) => yr !== undefined && yr !== null && yr !== ""),
+            );
+            const showYearInChip = distinctYears.size > 1;
 
             quarterlyPredictions.forEach((row) => {
                 const quarter = getRecordQuarter(row);
                 const qMeta = getCongestionMeta(row[timeKey]);
                 const chip = document.createElement("div");
                 chip.className = "quarter-chip";
-                if (activeQuarter !== null && String(quarter) === String(activeQuarter)) {
+                const matchesYear = activeYear === null || String(row.yr) === String(activeYear);
+                const matchesQuarter = activeQuarter !== null && String(quarter) === String(activeQuarter);
+                if (matchesYear && matchesQuarter) {
                     chip.classList.add("is-active");
                 }
                 const qLabel = document.createElement("span");
-                qLabel.textContent = quarter ? `Q${quarter}` : String(row.yr || "-");
+                if (quarter && showYearInChip && row.yr) {
+                    qLabel.textContent = `${String(row.yr).slice(-2)} Q${quarter}`;
+                } else {
+                    qLabel.textContent = quarter ? `Q${quarter}` : String(row.yr || "-");
+                }
                 const qVal = document.createElement("strong");
                 qVal.textContent = qMeta.value !== null ? `${qMeta.value.toFixed(1)}%` : "-";
                 chip.append(qLabel, qVal);
@@ -1679,6 +1902,8 @@ const SubwayDashboard = {
     OPERATING_TIME_SLOTS,
     getCongestionMeta,
     formatTimeLabel,
+    getCurrentYearQuarter,
+    selectPreferredPredictionRecord,
 };
 
 // Expose the classes for the HTML page and for browser-console experimentation.
