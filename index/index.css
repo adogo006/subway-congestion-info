@@ -27,6 +27,8 @@ body {
     text-align: center;
     border-bottom: 2px solid #555;
     padding-bottom: 12px;
+    width: 100vw;
+    margin-left: calc(50% - 50vw);
 }
 
 .header h1 {
