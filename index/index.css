@@ -30,8 +30,8 @@ body {
     padding-bottom: 12px;
     width: 100vw;
     margin-left: calc(50% - 50vw);
-    background-color: #ffffff;
-    box-shadow: 0 -60px 0 60px #ffffff;
+    background-color: #F1F5F9;
+    box-shadow: 0 -60px 0 60px #F1F5F9;
     clip-path: inset(-100px 0 0 0);
 }
 
