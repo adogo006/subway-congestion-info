@@ -150,6 +150,7 @@ body {
     width: 100%;
     overflow: visible;
     cursor: grab;
+    border: 2px solid #000
 }
 
 .station-map svg {
