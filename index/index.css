@@ -6,9 +6,10 @@
 
 body {
     margin: 0;
-    background-color: #ffffff;
+    background-color: color-mix(in srgb, var(--line-color, #0052A4) 10%, white);
     font-family: Arial, sans-serif;
     color: #333;
+    transition: background-color 0.3s ease;
 }
 
 /* 전체 */
@@ -774,4 +775,36 @@ body {
 .legend {
     position: relative;
     top: -15px;
+}
+
+body:has(.line-btn[data-line="1"].active) {
+    --line-color: #0052A4;
+}
+
+body:has(.line-btn[data-line="2"].active) {
+    --line-color: #00A84D;
+}
+
+body:has(.line-btn[data-line="3"].active) {
+    --line-color: #EF7C1C;
+}
+
+body:has(.line-btn[data-line="4"].active) {
+    --line-color: #00A5DE;
+}
+
+body:has(.line-btn[data-line="5"].active) {
+    --line-color: #996CAC;
+}
+
+body:has(.line-btn[data-line="6"].active) {
+    --line-color: #CD7C2F;
+}
+
+body:has(.line-btn[data-line="7"].active) {
+    --line-color: #747F00;
+}
+
+body:has(.line-btn[data-line="8"].active) {
+    --line-color: #E6186C;
 }
