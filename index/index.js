@@ -1412,6 +1412,7 @@ class ModalManager {
 
         if (this.lineBadge) {
             this.lineBadge.textContent = String(filters.line ?? prediction?.lnno ?? "");
+            this.lineBadge.dataset.line = this.lineBadge.textContent;
         }
         if (this.title) {
             this.title.textContent = station.station_name || prediction?.sttn_nm || "역 상세 정보";
