@@ -152,7 +152,7 @@ body {
     overflow: hidden;
     cursor: grab;
     position: relative;
-    outline: 1px solid #000;
+    outline: 2px solid #000;
 }
 
 .station-map svg {
@@ -176,8 +176,8 @@ body {
 }
 
 .station-map circle.is-selected {
-    stroke: #ffffff;
-    stroke-width: 1px;
+    stroke: #000000;
+    stroke-width: 2px;
     vector-effect: non-scaling-stroke;
 }
 
@@ -750,4 +750,12 @@ body {
         height: clamp(42px, 6vh, 54px);
     }
 
+}
+
+.header,
+.selection-info,
+.center-area,
+.legend {
+    position: relative;
+    top: -15px;
 }
