@@ -1907,18 +1907,3 @@ if (typeof window !== "undefined") {
 if (typeof module !== "undefined" && module.exports) {
     module.exports = SubwayDashboard;
 }
-
-function updateLegendPosition() {
-    const map = document.querySelector(".station-map");
-    const legend = document.querySelector(".legend");
-
-    if (!map || !legend) return;
-
-    const mapBottom = map.getBoundingClientRect().bottom;
-    const screenBottom = window.innerHeight;
-
-    legend.style.top = `${(mapBottom + screenBottom) / 2}px`;
-}
-
-window.addEventListener("load", updateLegendPosition);
-window.addEventListener("resize", updateLegendPosition);
