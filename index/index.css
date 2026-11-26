@@ -138,20 +138,6 @@ body {
     border-color: #E6186C;
 }
 
-.line-decoration {
-    position: absolute;
-    top: 480px;
-    left: 0;
-    width: 100px;
-    opacity: 0.25;
-    pointer-events: none;
-}
-
-.line-decoration svg {
-    display: block;
-    width: 100%;
-}
-
 /* 중앙 영역 */
 
 .center-area {
