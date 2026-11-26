@@ -1050,8 +1050,13 @@ class MapRenderer {
             if (!moved) {
                 return;
             }
-            this.panX = initialPanX + deltaX;
-            this.panY = initialPanY + deltaY;
+            const start = this.getSvgPoint(svg, startX, startY);
+            const current = this.getSvgPoint(
+                svg, event.clientX, event.clientY
+            );
+            
+            this.panX = initialPanX + (current.x - start.x);
+            this.panY = initialPanY + (current.y - start.y);
             this.updateMapTransform(svg.querySelector("g"));
         });
 
@@ -1169,6 +1174,15 @@ class MapRenderer {
     }
 
     updateMapTransform(group) {
+        const mapWidth = 970;
+        const mapHeight = 690;
+    
+        const minX = mapWidth * (1 - this.zoom);
+        const minY = mapHeight * (1 - this.zoom);
+    
+        this.panX = Math.max(minX, Math.min(0, this.panX));
+        this.panY = Math.max(minY, Math.min(0, this.panY));
+    
         if (group) {
             group.setAttribute(
                 "transform",
