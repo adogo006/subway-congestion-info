@@ -39,7 +39,7 @@ body {
     color: #333;
     font-size: 18px;
     text-align: center;
-    margin-top: 12px
+    margin-top: 12px;
 }
 
 /* 메인 영역 */
@@ -148,9 +148,10 @@ body {
 
 .station-map {
     width: 100%;
-    overflow: visible;
+    overflow: hidden;
     cursor: grab;
-    border: 2px solid #000
+    border: 2px solid #000;
+    position: relative;
 }
 
 .station-map svg {
