@@ -176,9 +176,10 @@ body {
 }
 
 .station-map circle.is-selected {
-    stroke: #000000;
+    stroke: #ffffff;
     stroke-width: 2px;
     vector-effect: non-scaling-stroke;
+    filter: drop-shadow(0 0 3px #000);
 }
 
 .station-map svg:focus:not(:focus-visible),
@@ -338,7 +339,7 @@ body {
     gap: 35px;
     margin: 0;
     padding: 16px 16px;
-    background-color: rgba(255, 255, 255, 0.9);
+    background-color: transparent;
 }
 
 .legend-item {
