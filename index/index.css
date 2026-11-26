@@ -152,7 +152,7 @@ body {
     overflow: hidden;
     cursor: grab;
     position: relative;
-    outline: 2px solid #000;
+    outline: 1px solid #000;
 }
 
 .station-map svg {
@@ -162,6 +162,7 @@ body {
     overflow: hidden;
     touch-action: none;
     user-select: none;
+    outline: none;
 }
 
 .station-map svg.is-dragging {
@@ -170,13 +171,19 @@ body {
 
 .station-map circle {
     cursor: pointer;
-    transition: fill 0.2s ease, stroke-width 0.15s ease;
+    transition: fill 0.2s ease;
+    outline: none;
 }
 
 .station-map circle.is-selected {
-    stroke: #111827;
-    stroke-width: 3px;
+    stroke: #ffffff;
+    stroke-width: 1px;
     vector-effect: non-scaling-stroke;
+}
+
+.station-map svg:focus:not(:focus-visible),
+.station-map circle:focus:not(:focus-visible) {
+    outline: none;
 }
 
 .station-label {
