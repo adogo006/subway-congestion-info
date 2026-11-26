@@ -177,7 +177,7 @@ body {
 
 .station-map circle.is-selected {
     stroke: #ffffff;
-    stroke-width: 3px;
+    stroke-width: 2.5px;
     vector-effect: non-scaling-stroke;
     filter: drop-shadow(0 0 1.5px rgba(0, 0, 0, 0.5));
 }
@@ -332,18 +332,13 @@ body {
 /* 혼잡도 범례 */
 
 .legend {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: auto;
-    z-index: 3;
+    position: static;
     display: flex;
     justify-content: center;
     align-items: center;
     gap: 35px;
     margin: 0;
-    padding: 0;
-    transform: translateY(-50%);
+    padding: 16px 16px;
     background-color: transparent;
 }
 
