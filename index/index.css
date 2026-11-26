@@ -324,17 +324,13 @@ body {
 /* 혼잡도 범례 */
 
 .legend {
-    position: fixed;
-    z-index: 3;
-    left: 0;
-    right: 0;
-    bottom: clamp(8px, 2vh, 24px);
+    position: static;
     display: flex;
     justify-content: center;
     align-items: center;
     gap: 35px;
     margin: 0;
-    padding: 8px 16px;
+    padding: 16px 16px;
     background-color: rgba(255, 255, 255, 0.9);
 }
 
