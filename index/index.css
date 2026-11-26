@@ -177,7 +177,7 @@ body {
 
 .station-map circle.is-selected {
     stroke: #ffffff;
-    stroke-width: 2px;
+    stroke-width: 3px;
     vector-effect: non-scaling-stroke;
     filter: drop-shadow(0 0 1.5px rgba(0, 0, 0, 0.5));
 }
@@ -335,7 +335,7 @@ body {
     position: fixed;
     left: 0;
     right: 0;
-    bottom: 30px;
+    bottom: auto;
     z-index: 3;
     display: flex;
     justify-content: center;
@@ -343,6 +343,7 @@ body {
     gap: 35px;
     margin: 0;
     padding: 0;
+    transform: translateY(-50%);
     background-color: transparent;
 }
 
