@@ -225,6 +225,11 @@
             button.addEventListener("click", () => {
                 uiManager.toggle_line(button.dataset.line);
                 updateSelectionInfo();
+                const isLine2 = String(uiManager.line) === "2";  
+                document.querySelector('[data-direction="상선"]').textContent =
+                    isLine2 ? "내선" : "상선";
+                document.querySelector('[data-direction="하선"]').textContent =
+                    isLine2 ? "외선" : "하선";
                 document.querySelectorAll(".line-btn").forEach((item) => {
                     item.classList.toggle("active", item === button);
                 });
