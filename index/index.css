@@ -179,7 +179,7 @@ body {
     stroke: #ffffff;
     stroke-width: 2px;
     vector-effect: non-scaling-stroke;
-    filter: drop-shadow(0 0 3px #000);
+    filter: drop-shadow(0 0 1.5px rgba(0, 0, 0, 0.5));
 }
 
 .station-map svg:focus:not(:focus-visible),
@@ -332,13 +332,17 @@ body {
 /* 혼잡도 범례 */
 
 .legend {
-    position: static;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 30px;
+    z-index: 3;
     display: flex;
     justify-content: center;
     align-items: center;
     gap: 35px;
     margin: 0;
-    padding: 16px 16px;
+    padding: 0;
     background-color: transparent;
 }
 
