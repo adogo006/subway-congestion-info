@@ -30,7 +30,8 @@ body {
     width: 100vw;
     margin-left: calc(50% - 50vw);
     background-color: #F1F5F9;
-    box-shadow: 0 -60px 0 0 #F1F5F9;
+    box-shadow: 0 -60px 0 60px #F1F5F9;
+    clip-path: inset(-100px 0 0 0);
 }
 
 .header h1 {
